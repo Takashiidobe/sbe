@@ -98,6 +98,15 @@ fn run_stage(stage: &str, path: &Path, source: &str) -> Result<String, Failed> {
             wasmparser::validate(&compiled.code).map_err(|e| format!("invalid wasm: {e}"))?;
             return Ok(compiled.wat);
         }
+        "module-x86_64" => {
+            let module = parse_module(&name, source).map_err(render)?;
+            let compiled = x86_64::compile_module(&module).map_err(render)?;
+            return Ok(compiled
+                .iter()
+                .map(|c| c.asm.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"));
+        }
         "module-parse-error" => {
             return match parse_module(&name, source) {
                 Ok(_) => Err("expected a parse error".into()),

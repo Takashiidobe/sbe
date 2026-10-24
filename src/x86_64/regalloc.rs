@@ -93,6 +93,11 @@ pub fn allocate(code: VCode<Reg>) -> Result<VCode<PReg>, CompileError> {
             widen(&mut vregs, v, i + block.insts.len() - 1);
         }
         for inst in &block.insts {
+            if matches!(inst, Inst::Call { .. }) {
+                for p in PReg::ALLOCATABLE {
+                    busy.entry(p).or_default().push((i, i + 1));
+                }
+            }
             for reg in inst.uses() {
                 match reg {
                     Reg::V(v) => widen(&mut vregs, v, i),
@@ -116,13 +121,22 @@ pub fn allocate(code: VCode<Reg>) -> Result<VCode<PReg>, CompileError> {
         busy.entry(p).or_default().push(interval);
     }
 
+    let has_call = code
+        .blocks
+        .iter()
+        .any(|b| b.insts.iter().any(|i| matches!(i, Inst::Call { .. })));
+    let candidates: Vec<PReg> = PReg::ALLOCATABLE
+        .into_iter()
+        .chain(PReg::CALLEE_SAVED.into_iter().filter(|_| has_call))
+        .collect();
+
     let mut order: Vec<_> = vregs.into_iter().collect();
     order.sort_by_key(|&(v, (start, _))| (start, v));
 
     let mut assigned: Vec<(Interval, PReg)> = Vec::new();
     let mut assignment: BTreeMap<VReg, PReg> = BTreeMap::new();
     for (v, interval) in order {
-        let free = PReg::ALLOCATABLE.into_iter().find(|p| {
+        let free = candidates.iter().copied().find(|p| {
             let fixed = busy.get(p).into_iter().flatten();
             let taken = assigned.iter().filter(|(_, q)| q == p).map(|(iv, _)| iv);
             !fixed.chain(taken).any(|&other| overlaps(interval, other))
@@ -136,7 +150,7 @@ pub fn allocate(code: VCode<Reg>) -> Result<VCode<PReg>, CompileError> {
         Reg::V(v) => assignment[&v],
         Reg::P(p) => p,
     };
-    let blocks = code
+    let mut blocks: Vec<VBlock<PReg>> = code
         .blocks
         .iter()
         .map(|block| VBlock {
@@ -149,8 +163,41 @@ pub fn allocate(code: VCode<Reg>) -> Result<VCode<PReg>, CompileError> {
         })
         .collect();
 
+    if has_call {
+        add_frame(&mut blocks, &assignment);
+    }
+
     Ok(VCode {
         name: code.name,
         blocks,
     })
+}
+
+/// saves the callee-saved registers the function uses. the return address leaves `rsp` 8 off a
+/// 16-byte boundary, so an even number of pushes needs 8 more bytes to keep calls aligned.
+fn add_frame(blocks: &mut [VBlock<PReg>], assignment: &BTreeMap<VReg, PReg>) {
+    let saved: Vec<PReg> = PReg::CALLEE_SAVED
+        .into_iter()
+        .filter(|p| assignment.values().any(|q| q == p))
+        .collect();
+    let padding = if saved.len().is_multiple_of(2) { 8 } else { 0 };
+
+    let mut prologue: Vec<Inst<PReg>> = saved.iter().map(|&reg| Inst::Push { reg }).collect();
+    let mut epilogue: Vec<Inst<PReg>> = saved.iter().rev().map(|&reg| Inst::Pop { reg }).collect();
+    if padding != 0 {
+        prologue.push(Inst::AdjustSp { bytes: padding });
+        epilogue.insert(0, Inst::AdjustSp { bytes: -padding });
+    }
+
+    for block in blocks.iter_mut() {
+        let mut insts = Vec::new();
+        for inst in block.insts.drain(..) {
+            if matches!(inst, Inst::Ret { .. }) {
+                insts.extend(epilogue.iter().cloned());
+            }
+            insts.push(inst);
+        }
+        block.insts = insts;
+    }
+    blocks[0].insts.splice(0..0, prologue);
 }

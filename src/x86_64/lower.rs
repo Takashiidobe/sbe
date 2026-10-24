@@ -137,10 +137,6 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         return Err(CompileError::TooManyReturns(signature.returns.len()));
     }
 
-    if !func.callees().is_empty() {
-        return Err(CompileError::Call);
-    }
-
     let cfg = ControlFlow::compute(func);
     let order = cfg.reverse_postorder();
     let layout = Layout::new(func, order);
@@ -161,7 +157,12 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         }
 
         for &inst in data.insts() {
-            let result = vreg(func.inst_result(inst).unwrap_or(Value::from_index(0)));
+            if let InstData::Call { callee, args } = func.inst(inst) {
+                let symbol = func.callee(*callee).name.clone();
+                lower_call(&mut insts, symbol, args, func.inst_result(inst))?;
+                continue;
+            }
+            let result = vreg(func.inst_result(inst).expect("only calls are void"));
             match func.inst(inst) {
                 InstData::Iconst { value, .. } => insts.push(Inst::MovImm {
                     dst: result,
@@ -218,7 +219,7 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                         src: vreg(*arg),
                     }),
                 },
-                InstData::Call { .. } => unreachable!("rejected above"),
+                InstData::Call { .. } => unreachable!("lowered above"),
                 InstData::Binary { op, args: [a, b] } => {
                     let ty = func.value_type(*a);
                     let signed = matches!(op, BinOp::Sshr | BinOp::Sdiv | BinOp::Srem);
@@ -312,6 +313,39 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         name: func.name().to_owned(),
         blocks,
     })
+}
+
+fn lower_call(
+    insts: &mut Vec<Inst<Reg>>,
+    symbol: String,
+    args: &[Value],
+    result: Option<Value>,
+) -> Result<(), CompileError> {
+    if args.len() > PReg::ARGS.len() {
+        return Err(CompileError::TooManyParams {
+            found: args.len(),
+            max: PReg::ARGS.len(),
+        });
+    }
+    let arg_regs: Vec<Reg> = PReg::ARGS.iter().map(|&p| Reg::P(p)).collect();
+    for (&arg, &dst) in args.iter().zip(&arg_regs) {
+        insts.push(Inst::Mov {
+            dst,
+            src: vreg(arg),
+        });
+    }
+    insts.push(Inst::Call {
+        symbol,
+        args: arg_regs[..args.len()].to_vec(),
+        ret: result.map(|_| Reg::P(PReg::RET)),
+    });
+    if let Some(result) = result {
+        insts.push(Inst::Mov {
+            dst: vreg(result),
+            src: Reg::P(PReg::RET),
+        });
+    }
+    Ok(())
 }
 
 fn lower_binary(

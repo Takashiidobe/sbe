@@ -4,7 +4,8 @@ use std::path::Path;
 use std::process::Command;
 
 use sbe::sir::parse_function;
-use sbe::x86_64::compile;
+use sbe::sir::parse_module;
+use sbe::x86_64::{compile, compile_module, module_object};
 
 fn link_and_run(sir: &str, c_main: &str) -> String {
     let func = parse_function("link", sir).unwrap();
@@ -73,4 +74,45 @@ int main(void) {
 "#,
     );
     assert_eq!(out, "1099511627766\n");
+}
+
+#[test]
+fn module_calls_c_imports_and_sibling_functions() {
+    let module = parse_module("calls", include_str!("programs/calls.sir")).unwrap();
+    let object = module_object(&compile_module(&module).unwrap()).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let object_path = dir.path().join("module.o");
+    let main_path = dir.path().join("main.c");
+    let exe_path = dir.path().join("prog");
+    std::fs::write(&object_path, object).unwrap();
+    std::fs::write(
+        &main_path,
+        r#"#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+long scale(long x) {
+    if ((uintptr_t)__builtin_frame_address(0) % 16 != 0) abort();
+    return x * 2;
+}
+void note(long x) { printf("note %ld\n", x); }
+extern long fact(long);
+extern long run(long);
+extern long pair(long, long);
+extern long sum5(long, long, long, long, long);
+int main(void) {
+    printf("%ld %ld %ld\n", fact(10), run(3), pair(5, 7));
+    printf("%ld\n", sum5(1, 2, 3, 4, 5));
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+
+    run(Command::new("cc")
+        .args(["-O0", "-fno-omit-frame-pointer", "-o"])
+        .arg(&exe_path)
+        .arg(&main_path)
+        .arg(&object_path));
+    assert_eq!(stdout_of(&exe_path), "note 6\n3628800 723 22\n17\n");
 }

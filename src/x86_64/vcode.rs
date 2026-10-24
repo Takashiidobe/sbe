@@ -26,6 +26,11 @@ pub enum PReg {
     R9,
     R10,
     R11,
+    Rbx,
+    R12,
+    R13,
+    R14,
+    R15,
 }
 
 impl PReg {
@@ -41,6 +46,13 @@ impl PReg {
         PReg::R10,
         PReg::R11,
     ];
+
+    /// preserved across calls, so a function that uses one must save and restore it
+    pub const CALLEE_SAVED: [PReg; 5] = [PReg::Rbx, PReg::R12, PReg::R13, PReg::R14, PReg::R15];
+
+    pub fn is_callee_saved(self) -> bool {
+        Self::CALLEE_SAVED.contains(&self)
+    }
 
     /// system v integer argument registers
     pub const ARGS: [PReg; 6] = [
@@ -65,6 +77,11 @@ impl PReg {
             PReg::R9 => "r9",
             PReg::R10 => "r10",
             PReg::R11 => "r11",
+            PReg::Rbx => "rbx",
+            PReg::R12 => "r12",
+            PReg::R13 => "r13",
+            PReg::R14 => "r14",
+            PReg::R15 => "r15",
         }
     }
 }
@@ -186,6 +203,9 @@ impl Cc {
     }
 }
 
+/// `Call` reads its argument registers and defines the result register; every caller-saved
+/// register is clobbered. `Push`, `Pop` and `AdjustSp` only appear in the prologue and epilogue
+/// that allocation adds; `AdjustSp` subtracts its byte count from `rsp`.
 /// two-address instructions: `Alu` reads and writes `dst`. `Shift` takes its count in `cl`, so
 /// `count` is `rcx` by the time of emission. `Cqo` and `Div` work on the `hi:lo` pair, which is
 /// `rdx:rax`; the quotient lands in `lo` and the remainder in `hi`. `Setcc` writes only the low
@@ -260,12 +280,33 @@ pub enum Inst<R> {
     Ret {
         has_value: bool,
     },
+    Call {
+        symbol: String,
+        args: Vec<R>,
+        ret: Option<R>,
+    },
+    Push {
+        reg: R,
+    },
+    Pop {
+        reg: R,
+    },
+    AdjustSp {
+        bytes: i32,
+    },
 }
 
 impl<R: Copy> Inst<R> {
     pub fn uses(&self) -> Vec<R> {
         match *self {
-            Inst::MovImm { .. } | Inst::Jnz { .. } | Inst::Jmp { .. } | Inst::Ret { .. } => vec![],
+            Inst::MovImm { .. }
+            | Inst::Jnz { .. }
+            | Inst::Jmp { .. }
+            | Inst::Ret { .. }
+            | Inst::Pop { .. }
+            | Inst::AdjustSp { .. } => vec![],
+            Inst::Call { ref args, .. } => args.clone(),
+            Inst::Push { reg } => vec![reg],
             Inst::Mov { src, .. } => vec![src],
             Inst::Alu { dst, src, .. } => vec![dst, src],
             Inst::Shift { dst, count, .. } => vec![dst, count],
@@ -294,13 +335,17 @@ impl<R: Copy> Inst<R> {
             | Inst::Movzx8 { dst }
             | Inst::Ext { dst, .. }
             | Inst::Cmov { dst, .. } => vec![dst],
+            Inst::Pop { reg } => vec![reg],
+            Inst::Call { ret, .. } => ret.into_iter().collect(),
             Inst::Cqo { hi, .. } => vec![hi],
             Inst::Div { lo, hi, .. } => vec![lo, hi],
             Inst::Cmp { .. }
             | Inst::Test { .. }
             | Inst::Jnz { .. }
             | Inst::Jmp { .. }
-            | Inst::Ret { .. } => vec![],
+            | Inst::Ret { .. }
+            | Inst::Push { .. }
+            | Inst::AdjustSp { .. } => vec![],
         }
     }
 
@@ -367,6 +412,18 @@ impl<R: Copy> Inst<R> {
             Inst::Jnz { target } => Inst::Jnz { target },
             Inst::Jmp { target } => Inst::Jmp { target },
             Inst::Ret { has_value } => Inst::Ret { has_value },
+            Inst::Call {
+                ref symbol,
+                ref args,
+                ret,
+            } => Inst::Call {
+                symbol: symbol.clone(),
+                args: args.iter().map(|&r| f(r)).collect(),
+                ret: ret.map(&mut f),
+            },
+            Inst::Push { reg } => Inst::Push { reg: f(reg) },
+            Inst::Pop { reg } => Inst::Pop { reg: f(reg) },
+            Inst::AdjustSp { bytes } => Inst::AdjustSp { bytes },
         }
     }
 }
@@ -401,6 +458,10 @@ impl<R: fmt::Display> fmt::Display for Inst<R> {
             Inst::Jnz { target } => write!(f, "jnz {target}"),
             Inst::Jmp { target } => write!(f, "jmp {target}"),
             Inst::Ret { .. } => f.write_str("ret"),
+            Inst::Call { symbol, .. } => write!(f, "call %{symbol}"),
+            Inst::Push { reg } => write!(f, "push {reg}"),
+            Inst::Pop { reg } => write!(f, "pop {reg}"),
+            Inst::AdjustSp { bytes } => write!(f, "sub rsp, {bytes}"),
         }
     }
 }

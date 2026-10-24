@@ -23,9 +23,19 @@ Types are `i8`, `i16`, `i32` and `i64`. Instructions:
 - `icmp <cc> a, b` yields an `i8` that is exactly 0 or 1.
 - `select cond, a, b`: `cond` is an `i8`, the arms share a type.
 - `sextend <ty> v`, `uextend <ty> v` widen. `ireduce <ty> v` narrows.
+- `call fnN(args)`: `fnN` is declared at the top of the function with
+  `fnN = %name(types) -> type`. The call yields a value (`v1 = call fn0(v0)`)
+  only when the callee returns one. Callees return at most one value.
 
 Terminators are `return`, `jump`, and `brif`. `brif` needs an `i8` condition.
 Function params cannot be `i8`.
+
+## Modules
+
+A `Module` holds defined functions and `import %name(types) -> type`
+declarations in one namespace. A call names its callee, so a function verifies
+on its own (`verify`) and `verify_module` checks that every callee resolves to a
+function or import with the same signature. `parse_module` reads the text form.
 
 ## Integer widths
 

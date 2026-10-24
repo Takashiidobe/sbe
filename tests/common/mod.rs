@@ -123,3 +123,11 @@ pub fn calls_scale(x: i64) -> i64 {
 pub fn calls_run(n: i64) -> i64 {
     (1..=calls_scale(n)).product::<i64>() + n
 }
+
+pub fn calls_pair(a: i64, b: i64) -> i64 {
+    calls_scale(a) + a + b
+}
+
+pub fn calls_sum5(args: [i64; 5]) -> i64 {
+    calls_scale(args[0]) + args.iter().sum::<i64>()
+}

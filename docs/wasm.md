@@ -3,6 +3,12 @@
 `wasm::compile(&func)` returns the module bytes and its WAT text. Every sir
 value gets its own wasm local; params are the first locals.
 
+## Modules and calls
+
+`compile_module(&module)` puts imports first in the function index space, under
+module name `env`, then the defined functions, each exported by name. `compile`
+on a single function that calls others imports every distinct callee.
+
 ## Control flow
 
 Reducible functions use structured control flow built from the dominator tree

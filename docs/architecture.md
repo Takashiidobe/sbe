@@ -1,6 +1,6 @@
 # Architecture
 
-sbe takes one function in its own SSA IR (sir) and produces wasm bytes or x86_64
+sbe takes functions in its own SSA IR (sir) and produces wasm bytes or x86_64
 machine code. Frontends build sir directly; there is no source language here.
 
 ```
