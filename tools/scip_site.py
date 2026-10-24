@@ -145,6 +145,9 @@ body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui,
 a { color:var(--acc); text-decoration:none; } a:hover { text-decoration:underline; }
 header { padding:8px 16px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; }
 main { display:flex; align-items:flex-start; }
+main.closed aside { display:none; }
+header button { margin-left:auto; font:inherit; padding:2px 10px; background:var(--pan); color:var(--fg);
+                border:1px solid var(--line); border-radius:4px; cursor:pointer; }
 .code { flex:1; min-width:0; overflow-x:auto; padding:8px 0; }
 table { border-collapse:collapse; font:13px/1.45 ui-monospace, monospace; }
 td.n { color:var(--mut); text-align:right; padding:0 12px; user-select:none; }
@@ -229,10 +232,18 @@ function show(sym) {
   document.querySelectorAll('.s.on').forEach(e => e.classList.remove('on'));
   document.querySelectorAll('.s').forEach(e => { if (e.dataset.s === sym) e.classList.add('on'); });
 }
+const main = document.querySelector('main');
+const setOpen = open => {
+  main.classList.toggle('closed', !open);
+  try { localStorage.setItem('panelOpen', open ? '1' : '0'); } catch (e) {}
+};
+document.getElementById('toggle').addEventListener('click', () => setOpen(main.classList.contains('closed')));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') setOpen(false); });
 document.addEventListener('click', e => {
   const t = e.target.closest('.s');
-  if (t) show(t.dataset.s);
+  if (t) { show(t.dataset.s); setOpen(true); }
 });
+try { if (localStorage.getItem('panelOpen') === '1') setOpen(true); } catch (e) {}
 if (location.hash.startsWith('#L')) {
   const row = document.getElementById(location.hash.slice(1));
   if (row) { row.classList.add('hl'); row.scrollIntoView({block:'center'}); }
@@ -366,8 +377,9 @@ def write_site(index):
         (OUT / page_name(path)).write_text(
             f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(path)}</title><link rel="stylesheet" href="style.css">
-<header><a href="index.html">index</a><b>{html.escape(path)}</b></header>
-<main><div class="code"><table>{body}</table></div><aside id="panel"><p>Click an identifier.</p></aside></main>
+<header><a href="index.html">index</a><b>{html.escape(path)}</b>
+<button id="toggle" title="Toggle the symbol panel (Esc closes)">panel</button></header>
+<main class="closed"><div class="code"><table>{body}</table></div><aside id="panel"><p>Click an identifier.</p></aside></main>
 <script src="data.js"></script><script src="site.js"></script>"""
         )
 
