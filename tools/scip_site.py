@@ -227,7 +227,9 @@ STYLE = """
 }
 body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, sans-serif; }
 a { color:var(--acc); text-decoration:none; } a:hover { text-decoration:underline; }
-header { padding:8px 16px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; }
+header { padding:8px 16px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline;
+         position:sticky; top:0; z-index:10; background:var(--bg); }
+tr { scroll-margin-top:var(--hh, 44px); }
 main { display:flex; align-items:flex-start; }
 main.closed aside { display:none; }
 header button { margin-left:auto; font:inherit; padding:2px 10px; background:var(--pan); color:var(--fg);
@@ -240,7 +242,7 @@ tr.hl { background:var(--hl); }
 .t-k { color:var(--k); } .t-ty { color:var(--ty); } .t-st { color:var(--st); } .t-nu { color:var(--nu); }
 .t-cm { color:var(--cm); font-style:italic; } .t-at { color:var(--at); } .t-lt, .t-mc { color:var(--lt); }
 .s { cursor:pointer; } .s:hover, .s.on { background:var(--hl); border-radius:2px; } .s.d { font-weight:600; }
-aside { width:380px; flex:none; position:sticky; top:0; max-height:100vh; overflow:auto;
+aside { width:380px; flex:none; position:sticky; top:var(--hh, 44px); max-height:calc(100vh - var(--hh, 44px)); overflow:auto;
         padding:12px 16px; background:var(--pan); border-left:1px solid var(--line); }
 aside h2 { font-size:13px; margin:12px 0 4px; } aside code { font-size:12px; word-break:break-all; }
 aside ul { list-style:none; padding:0; margin:0; } aside li { padding:2px 0; font-size:13px; }
@@ -319,6 +321,7 @@ function show(sym) {
   document.querySelectorAll('.s').forEach(e => { if (e.dataset.s === sym) e.classList.add('on'); });
 }
 const main = document.querySelector('main');
+document.documentElement.style.setProperty('--hh', document.querySelector('header').offsetHeight + 'px');
 const setOpen = open => {
   main.classList.toggle('closed', !open);
   try { localStorage.setItem('panelOpen', open ? '1' : '0'); } catch (e) {}
