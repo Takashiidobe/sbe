@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use filecheck::{CheckerBuilder, NO_VARIABLES};
 use libtest_mimic::{Arguments, Failed, Trial};
 use miette::{Diagnostic, NarratableReportHandler};
-use sbe::sir::{parse_function, verify};
+use sbe::sir::{Function, ParseError, parse_function, verify};
 use sbe::sopt::PassManager;
+use sbe::x86_64;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/filetests");
 
@@ -83,6 +84,20 @@ fn run_stage(stage: &str, path: &Path, source: &str) -> Result<String, Failed> {
                 .map_err(render)?;
             Ok(func.to_string())
         }
+        "x86_64-vcode" => {
+            let func = verified(parsed)?;
+            Ok(x86_64::lower(&func).map_err(render)?.to_string())
+        }
+        "x86_64" => Ok(x86_64::compile(&verified(parsed)?).map_err(render)?.asm),
+        "x86_64-hex" => {
+            let code = x86_64::compile(&verified(parsed)?).map_err(render)?.code;
+            let hex: Vec<_> = code.iter().map(|b| format!("{b:02x}")).collect();
+            Ok(format!("{}\n", hex.join(" ")))
+        }
+        "x86_64-error" => match x86_64::compile(&verified(parsed)?) {
+            Ok(_) => Err("expected a compile error".into()),
+            Err(err) => Ok(render_string(&err)),
+        },
         "verify" => {
             let func = parsed.map_err(render)?;
             Ok(match verify(&func) {
@@ -96,6 +111,12 @@ fn run_stage(stage: &str, path: &Path, source: &str) -> Result<String, Failed> {
         },
         other => Err(format!("unknown stage `{other}`").into()),
     }
+}
+
+fn verified(parsed: Result<Function, ParseError>) -> Result<Function, Failed> {
+    let func = parsed.map_err(render)?;
+    verify(&func).map_err(render)?;
+    Ok(func)
 }
 
 fn render(diagnostic: impl Diagnostic) -> Failed {

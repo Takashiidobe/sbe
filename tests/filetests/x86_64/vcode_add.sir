@@ -1,0 +1,13 @@
+; test x86_64-vcode
+; check: vcode %add:
+; nextln:     mov v0, rdi
+; nextln:     mov v1, rsi
+; nextln:     mov v2, v0
+; nextln:     add v2, v1
+; nextln:     mov rax, v2
+; nextln:     ret
+function %add(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    return v2
+}

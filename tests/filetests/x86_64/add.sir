@@ -1,0 +1,11 @@
+; test x86_64
+; check: add:
+; nextln:     mov rax, rdi
+; nextln:     mov rcx, rsi
+; nextln:     add rax, rcx
+; nextln:     ret
+function %add(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    return v2
+}

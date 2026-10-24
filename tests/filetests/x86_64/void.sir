@@ -1,0 +1,7 @@
+; test x86_64
+; check: nop:
+; nextln:     ret
+function %nop() {
+block0:
+    return
+}

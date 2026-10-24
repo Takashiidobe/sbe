@@ -1,0 +1,11 @@
+; test x86_64
+; param registers are read in order while earlier values already hold registers
+; check: sub3:
+; check: add
+; check: ret
+function %sub3(i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64):
+    v3 = iadd v2, v1
+    v4 = iadd v3, v0
+    return v4
+}

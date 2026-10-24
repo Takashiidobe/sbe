@@ -1,0 +1,17 @@
+; test x86_64
+; check: big:
+; nextln:     mov rax, 0xa
+; nextln:     mov rcx, -0x14
+; nextln:     mov rdx, 0x100000000
+; nextln:     add rax, rcx
+; nextln:     add rax, rdx
+; nextln:     ret
+function %big() -> i64 {
+block0:
+    v0 = iconst 10
+    v1 = iconst -20
+    v2 = iconst 4294967296
+    v3 = iadd v0, v1
+    v4 = iadd v3, v2
+    return v4
+}

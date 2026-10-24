@@ -1,0 +1,6 @@
+; test x86_64-error
+; check: x86_64 supports at most 6 register params, found 7
+function %f(i64, i64, i64, i64, i64, i64, i64) {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64):
+    return
+}

@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+iced-x86 = { version = "1.21.0", features = ["code_asm"] }
 miette = "7.6.0"
 thiserror = "2.0.21"
 
 [dev-dependencies]
 filecheck = "0.5.0"
 libtest-mimic = "0.8.2"
+memmap2 = "0.9.12"
 
 [[test]]
 name = "filetests"
