@@ -47,6 +47,33 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
+## Project Rules
+
+These override the conservative git defaults in the Beads blocks below.
+
+### Commits
+
+- You may make git commits without asking. Commit messages are a single line (no body, no trailers).
+- Still do not push or run `bd dolt push` unless asked.
+
+### End of every turn that changed code
+
+Run, in order:
+
+```bash
+cargo clippy --fix --allow-dirty
+cargo fmt
+cargo nextest r --release   # once there is code to test
+```
+
+### Testing
+
+- **No unit tests.** Do not add `#[cfg(test)]` modules or `#[test]` functions inside `src/`.
+- All tests are end-to-end, under `tests/`:
+  - filetests (`tests/filetests/*.sir`) matched with `filecheck` on printed IR, WAT, and asm text.
+  - execution tests that compile a function and run it (wasm via wasmtime, x86_64 via a linked or mmapped harness), using dev-dependencies only.
+- Test harnesses and runtime-execution crates belong in `[dev-dependencies]`, never in `[dependencies]`.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
 
