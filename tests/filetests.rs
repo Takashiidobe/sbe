@@ -5,6 +5,7 @@ use filecheck::{CheckerBuilder, NO_VARIABLES};
 use libtest_mimic::{Arguments, Failed, Trial};
 use miette::{Diagnostic, NarratableReportHandler};
 use sbe::sir::{parse_function, verify};
+use sbe::sopt::PassManager;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/filetests");
 
@@ -71,6 +72,15 @@ fn run_stage(stage: &str, path: &Path, source: &str) -> Result<String, Failed> {
         "print" => {
             let func = parsed.map_err(render)?;
             verify(&func).map_err(render)?;
+            Ok(func.to_string())
+        }
+        "opt" => {
+            let mut func = parsed.map_err(render)?;
+            verify(&func).map_err(render)?;
+            PassManager::default_pipeline()
+                .verify_between_passes(true)
+                .run(&mut func)
+                .map_err(render)?;
             Ok(func.to_string())
         }
         "verify" => {

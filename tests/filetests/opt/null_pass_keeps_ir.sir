@@ -1,0 +1,12 @@
+; test opt
+; the default pipeline is a null pass, so output matches the input
+; check: function %add(i64, i64) -> i64 {
+; nextln: block0(v0: i64, v1: i64):
+; nextln:     v2 = iadd v0, v1
+; nextln:     return v2
+; nextln: }
+function %add(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    return v2
+}
