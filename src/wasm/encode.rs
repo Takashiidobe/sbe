@@ -319,6 +319,19 @@ impl Emitter<'_> {
         }
     }
 
+    /// leaves an i32 that is 1 when `value` equals `key`
+    fn emit_key_test(&mut self, value: Value, key: i64) {
+        let ty = self.ty(value);
+        self.get_extended(value, false);
+        if ty == Type::I64 {
+            self.op(Instruction::I64Const(key));
+            self.op(Instruction::I64Eq);
+        } else {
+            self.op(Instruction::I32Const(ty.truncate(key) as i32));
+            self.op(Instruction::I32Eq);
+        }
+    }
+
     fn emit_return(&mut self, values: &[Value]) {
         if self.frame_size > 0 {
             self.op(Instruction::LocalGet(self.frame_local));
@@ -386,6 +399,26 @@ impl Emitter<'_> {
         self.emit_insts(x);
         match self.func.block(x).terminator().expect("verified function") {
             Terminator::Return { values } => self.emit_return(values),
+            Terminator::Trap | Terminator::Unreachable => self.op(Instruction::Unreachable),
+            Terminator::Switch {
+                value,
+                cases,
+                default,
+                default_args,
+            } => {
+                for case in cases {
+                    self.emit_key_test(*value, case.key);
+                    self.op(Instruction::If(BlockType::Empty));
+                    ctx.push(Frame::Other);
+                    self.do_branch(x, case.dest, &case.args, ctx);
+                    self.op(Instruction::Else);
+                }
+                self.do_branch(x, *default, default_args, ctx);
+                for _ in cases {
+                    ctx.pop();
+                    self.op(Instruction::End);
+                }
+            }
             Terminator::Jump { dest, args } => self.do_branch(x, *dest, args, ctx),
             Terminator::Brif {
                 cond,
@@ -447,6 +480,26 @@ impl Emitter<'_> {
             let terminator = self.func.block(block).terminator().expect("verified");
             match terminator {
                 Terminator::Return { values } => self.emit_return(values),
+                Terminator::Trap | Terminator::Unreachable => self.op(Instruction::Unreachable),
+                Terminator::Switch {
+                    value,
+                    cases,
+                    default,
+                    default_args,
+                } => {
+                    for (k, case) in cases.iter().enumerate() {
+                        self.emit_key_test(*value, case.key);
+                        self.op(Instruction::If(BlockType::Empty));
+                        let depth = loop_depth + k as u32 + 1;
+                        self.dispatch_edge(case.dest, &case.args, index_of(case.dest), pc, depth);
+                        self.op(Instruction::Else);
+                    }
+                    let depth = loop_depth + cases.len() as u32;
+                    self.dispatch_edge(*default, default_args, index_of(*default), pc, depth);
+                    for _ in cases {
+                        self.op(Instruction::End);
+                    }
+                }
                 Terminator::Jump { dest, args } => {
                     self.dispatch_edge(*dest, args, index_of(*dest), pc, loop_depth);
                 }

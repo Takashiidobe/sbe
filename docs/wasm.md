@@ -21,6 +21,10 @@ and nothing is bounds-checked beyond wasm's own trap.
 
 ## Control flow
 
+`switch` is a chain of `if`/`else` comparisons, not a `br_table`, so each edge
+can run its own block-arg moves and inline its destination. `trap` and
+`unreachable` are wasm `unreachable`.
+
 Reducible functions use structured control flow built from the dominator tree
 (Ramsey's "Beyond Relooper"): a `block` per merge point, a `loop` per loop
 header, and `br` to the right depth. Irreducible functions fall back to a loop

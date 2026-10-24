@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use super::ast::{FunctionAst, Name, Op, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
-use crate::sir::{Block, FuncRef, Function, InstData, Signature, StackSlot, Terminator, Value};
+use crate::sir::{
+    Block, FuncRef, Function, InstData, Signature, StackSlot, SwitchCase, Terminator, Value,
+};
 
 struct Names<'a> {
     values: HashMap<&'a str, Value>,
@@ -234,6 +236,32 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
                     else_args,
                 }
             }
+            Some(TermAst::Switch {
+                value,
+                cases,
+                default,
+            }) => {
+                let cases = cases
+                    .iter()
+                    .map(|(key, target)| {
+                        let (dest, args) = names.target(target)?;
+                        Ok(SwitchCase {
+                            key: *key,
+                            dest,
+                            args,
+                        })
+                    })
+                    .collect::<PResult<Vec<_>>>()?;
+                let (default, default_args) = names.target(default)?;
+                Terminator::Switch {
+                    value: names.value(*value)?,
+                    cases,
+                    default,
+                    default_args,
+                }
+            }
+            Some(TermAst::Trap) => Terminator::Trap,
+            Some(TermAst::Unreachable) => Terminator::Unreachable,
             None => continue,
         };
         func.set_terminator(id, terminator);

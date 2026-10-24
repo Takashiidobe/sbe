@@ -33,7 +33,12 @@ Types are `i8`, `i16`, `i32` and `i64`. Instructions:
   function with `ssN = stack_slot <bytes>`. Slots are 8-byte aligned and live
   until the function returns.
 
-Terminators are `return`, `jump`, and `brif`. `brif` needs an `i8` condition.
+Terminators are `return`, `jump`, `brif`, `switch`, `trap` and `unreachable`.
+`brif` needs an `i8` condition. `switch v, k: target, ..., default: target`
+tests an integer against each key in order; keys are truncated to the value's
+type, and two keys that truncate to the same bits are rejected. Every edge may
+pass block args. `trap` traps when executed. `unreachable` marks code that
+control never reaches; reaching it is undefined, and both backends trap.
 Function params cannot be `i8`.
 
 ## Modules

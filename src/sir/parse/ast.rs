@@ -40,6 +40,13 @@ pub(super) enum TermAst<'a> {
     Return(Vec<Name<'a>>),
     Jump(TargetAst<'a>),
     Brif(Name<'a>, TargetAst<'a>, TargetAst<'a>),
+    Switch {
+        value: Name<'a>,
+        cases: Vec<(i64, TargetAst<'a>)>,
+        default: TargetAst<'a>,
+    },
+    Trap,
+    Unreachable,
 }
 
 pub(super) struct BlockAst<'a> {

@@ -249,6 +249,14 @@ impl InstData {
     }
 }
 
+/// takes `dest` when the switch value equals `key` once both are truncated to the value's type
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SwitchCase {
+    pub key: i64,
+    pub dest: Block,
+    pub args: Vec<Value>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Terminator {
     Return {
@@ -266,12 +274,33 @@ pub enum Terminator {
         else_dest: Block,
         else_args: Vec<Value>,
     },
+    /// compares an integer `value` against each case in order and falls back to `default`
+    Switch {
+        value: Value,
+        cases: Vec<SwitchCase>,
+        default: Block,
+        default_args: Vec<Value>,
+    },
+    /// traps when executed
+    Trap,
+    /// marks a point control never reaches; reaching it is undefined, and both backends trap
+    Unreachable,
 }
 
 impl Terminator {
     pub fn args(&self) -> Vec<Value> {
         match self {
             Terminator::Return { values } => values.clone(),
+            Terminator::Trap | Terminator::Unreachable => vec![],
+            Terminator::Switch {
+                value,
+                cases,
+                default_args,
+                ..
+            } => std::iter::once(*value)
+                .chain(cases.iter().flat_map(|c| c.args.iter().copied()))
+                .chain(default_args.iter().copied())
+                .collect(),
             Terminator::Jump { args, .. } => args.clone(),
             Terminator::Brif {
                 cond,
@@ -287,7 +316,17 @@ impl Terminator {
     /// every outgoing edge with the values it passes to the destination's params
     pub fn targets(&self) -> Vec<(Block, &[Value])> {
         match self {
-            Terminator::Return { .. } => vec![],
+            Terminator::Return { .. } | Terminator::Trap | Terminator::Unreachable => vec![],
+            Terminator::Switch {
+                cases,
+                default,
+                default_args,
+                ..
+            } => cases
+                .iter()
+                .map(|c| (c.dest, c.args.as_slice()))
+                .chain(std::iter::once((*default, default_args.as_slice())))
+                .collect(),
             Terminator::Jump { dest, args } => vec![(*dest, args)],
             Terminator::Brif {
                 then_dest,

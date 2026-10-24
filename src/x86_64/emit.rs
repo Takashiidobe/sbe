@@ -222,6 +222,8 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
                 }
                 Inst::Test { reg } => a.test(asm_reg(reg), asm_reg(reg)),
                 Inst::Jnz { target } => a.jne(labels[resolved[target.0]]),
+                Inst::Jz { target } => a.je(labels[resolved[target.0]]),
+                Inst::Ud2 => a.ud2(),
                 Inst::Jmp { target } => a.jmp(labels[resolved[target.0]]),
                 Inst::Ret { .. } => a.ret(),
                 Inst::Call { ref symbol, .. } => {
@@ -257,6 +259,7 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
             .map_err(assemble_error)?;
             lines.push(match *inst {
                 Inst::Jnz { target } => Line::Branch("jne", resolved[target.0]),
+                Inst::Jz { target } => Line::Branch("je", resolved[target.0]),
                 Inst::Jmp { target } => Line::Branch("jmp", resolved[target.0]),
                 Inst::Call { ref symbol, .. } => Line::Call(symbol.clone()),
                 _ => Line::Plain,

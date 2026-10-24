@@ -2,8 +2,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    BinOp, Block, CvtOp, FuncRef, Function, InstData, IntCC, Signature, StackSlot, Terminator,
-    Type, UnOp, Value, VerifyErrors, verify::verify,
+    BinOp, Block, CvtOp, FuncRef, Function, InstData, IntCC, Signature, StackSlot, SwitchCase,
+    Terminator, Type, UnOp, Value, VerifyErrors, verify::verify,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Diagnostic)]
@@ -201,6 +201,36 @@ impl FunctionBuilder {
             else_dest,
             else_args: else_args.to_vec(),
         })
+    }
+
+    pub fn switch(
+        &mut self,
+        value: Value,
+        cases: Vec<SwitchCase>,
+        default: Block,
+        default_args: &[Value],
+    ) -> Result<(), BuilderError> {
+        self.check_value(value)?;
+        for case in &cases {
+            self.check_block(case.dest)?;
+            case.args.iter().try_for_each(|&v| self.check_value(v))?;
+        }
+        self.check_block(default)?;
+        default_args.iter().try_for_each(|&v| self.check_value(v))?;
+        self.terminate(Terminator::Switch {
+            value,
+            cases,
+            default,
+            default_args: default_args.to_vec(),
+        })
+    }
+
+    pub fn trap(&mut self) -> Result<(), BuilderError> {
+        self.terminate(Terminator::Trap)
+    }
+
+    pub fn unreachable(&mut self) -> Result<(), BuilderError> {
+        self.terminate(Terminator::Unreachable)
     }
 
     pub fn finish(self) -> Result<Function, VerifyErrors> {

@@ -149,3 +149,31 @@ pub fn memory_squares(n: i64) -> i64 {
 pub fn memory_rec(n: i64) -> i64 {
     (1..=n).sum()
 }
+
+pub const SWITCH: &str = include_str!("../programs/switch.sir");
+
+pub fn switch_classify(x: i64) -> i64 {
+    match x {
+        0 | -1 => 10,
+        1 => 21,
+        5 => 30,
+        _ => x.wrapping_add(x),
+    }
+}
+
+pub fn switch_by_byte(x: i64) -> i64 {
+    match x as i8 {
+        1 => 1,
+        -1 => 2,
+        _ => 3,
+    }
+}
+
+pub fn switch_ping(sel: i64, n: i64) -> i64 {
+    match sel {
+        0 | 1 => n.max(0),
+        _ => -1,
+    }
+}
+
+pub const SWITCH_BYTE_SAMPLES: [i64; 8] = [0, 1, -1, 255, 257, -255, 256, 5];

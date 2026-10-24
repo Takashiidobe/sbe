@@ -139,6 +139,23 @@ impl Display for Function {
                     write_target(f, *else_dest, else_args)?;
                     f.write_char('\n')?;
                 }
+                Some(Terminator::Switch {
+                    value,
+                    cases,
+                    default,
+                    default_args,
+                }) => {
+                    write!(f, "    switch {value}")?;
+                    for case in cases {
+                        write!(f, ", {}: ", case.key)?;
+                        write_target(f, case.dest, &case.args)?;
+                    }
+                    f.write_str(", default: ")?;
+                    write_target(f, *default, default_args)?;
+                    f.write_char('\n')?;
+                }
+                Some(Terminator::Trap) => f.write_str("    trap\n")?,
+                Some(Terminator::Unreachable) => f.write_str("    unreachable\n")?,
                 None => {}
             }
         }

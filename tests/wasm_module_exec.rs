@@ -91,3 +91,53 @@ fn memory_and_shadow_stack() {
     memory.read(&store, 1001, &mut byte).unwrap();
     assert_eq!(byte, [0xff]);
 }
+
+#[test]
+fn switch_trap_and_irreducible_dispatch() {
+    let module = parse_module("switch", common::SWITCH).unwrap();
+    let code = compile_module(&module).unwrap().code;
+    wasmparser::validate(&code).unwrap();
+
+    let engine = Engine::default();
+    let mut store = Store::new(&engine, ());
+    let instance = Linker::new(&engine)
+        .instantiate_and_start(&mut store, &Module::new(&engine, &code).unwrap())
+        .unwrap();
+
+    let classify = instance
+        .get_typed_func::<i64, i64>(&store, "classify")
+        .unwrap();
+    let by_byte = instance
+        .get_typed_func::<i64, i64>(&store, "by_byte")
+        .unwrap();
+    for x in common::SAMPLES.into_iter().chain([2, 3, 4, 6]) {
+        assert_eq!(
+            classify.call(&mut store, x).unwrap(),
+            common::switch_classify(x)
+        );
+    }
+    for x in common::SWITCH_BYTE_SAMPLES {
+        assert_eq!(
+            by_byte.call(&mut store, x).unwrap(),
+            common::switch_by_byte(x)
+        );
+    }
+
+    let ping = instance
+        .get_typed_func::<(i64, i64), i64>(&store, "ping")
+        .unwrap();
+    for sel in [0, 1, 2, -1] {
+        for n in [-3, 0, 1, 2, 7] {
+            assert_eq!(
+                ping.call(&mut store, (sel, n)).unwrap(),
+                common::switch_ping(sel, n)
+            );
+        }
+    }
+
+    let div = instance
+        .get_typed_func::<(i64, i64), i64>(&store, "checked_div")
+        .unwrap();
+    assert_eq!(div.call(&mut store, (-9, 2)).unwrap(), -4);
+    assert!(div.call(&mut store, (1, 0)).is_err());
+}

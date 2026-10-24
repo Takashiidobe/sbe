@@ -274,6 +274,11 @@ pub enum Inst<R> {
     Jnz {
         target: Label,
     },
+    /// jumps when the last `Cmp` found its operands equal
+    Jz {
+        target: Label,
+    },
+    Ud2,
     Jmp {
         target: Label,
     },
@@ -317,6 +322,8 @@ impl<R: Copy> Inst<R> {
         match *self {
             Inst::MovImm { .. }
             | Inst::Jnz { .. }
+            | Inst::Jz { .. }
+            | Inst::Ud2
             | Inst::Jmp { .. }
             | Inst::Ret { .. }
             | Inst::Pop { .. }
@@ -363,6 +370,8 @@ impl<R: Copy> Inst<R> {
             Inst::Cmp { .. }
             | Inst::Test { .. }
             | Inst::Jnz { .. }
+            | Inst::Jz { .. }
+            | Inst::Ud2
             | Inst::Jmp { .. }
             | Inst::Ret { .. }
             | Inst::Store { .. }
@@ -373,7 +382,7 @@ impl<R: Copy> Inst<R> {
 
     pub fn target(&self) -> Option<Label> {
         match *self {
-            Inst::Jnz { target } | Inst::Jmp { target } => Some(target),
+            Inst::Jnz { target } | Inst::Jz { target } | Inst::Jmp { target } => Some(target),
             _ => None,
         }
     }
@@ -432,6 +441,8 @@ impl<R: Copy> Inst<R> {
             },
             Inst::Test { reg } => Inst::Test { reg: f(reg) },
             Inst::Jnz { target } => Inst::Jnz { target },
+            Inst::Jz { target } => Inst::Jz { target },
+            Inst::Ud2 => Inst::Ud2,
             Inst::Jmp { target } => Inst::Jmp { target },
             Inst::Ret { has_value } => Inst::Ret { has_value },
             Inst::Call {
@@ -492,6 +503,8 @@ impl<R: fmt::Display> fmt::Display for Inst<R> {
             } => write!(f, "{} {divisor}", if *signed { "idiv" } else { "div" }),
             Inst::Test { reg } => write!(f, "test {reg}, {reg}"),
             Inst::Jnz { target } => write!(f, "jnz {target}"),
+            Inst::Jz { target } => write!(f, "jz {target}"),
+            Inst::Ud2 => f.write_str("ud2"),
             Inst::Jmp { target } => write!(f, "jmp {target}"),
             Inst::Ret { .. } => f.write_str("ret"),
             Inst::Call { symbol, .. } => write!(f, "call %{symbol}"),

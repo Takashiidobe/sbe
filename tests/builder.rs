@@ -1,4 +1,4 @@
-use sbe::sir::{BuilderError, FunctionBuilder, Signature, Type, Value};
+use sbe::sir::{BuilderError, FunctionBuilder, Signature, SwitchCase, Type, Value};
 
 fn i64_sig(params: usize, returns: usize) -> Signature {
     Signature {
@@ -180,5 +180,43 @@ fn rejects_calls_to_undeclared_callees() {
     assert_eq!(
         builder.call(foreign, &[]),
         Err(BuilderError::UnknownCallee(foreign))
+    );
+}
+
+#[test]
+fn builds_switch_and_trap() {
+    let mut builder = FunctionBuilder::new("f", i64_sig(1, 1));
+    let entry = builder.entry_block();
+    let one = builder.create_block();
+    let bad = builder.create_block();
+    builder.switch_to_block(entry).unwrap();
+    let x = builder.block_params(entry).unwrap()[0];
+    builder
+        .switch(
+            x,
+            vec![SwitchCase {
+                key: 1,
+                dest: one,
+                args: vec![],
+            }],
+            bad,
+            &[],
+        )
+        .unwrap();
+    builder.switch_to_block(one).unwrap();
+    builder.ret(x).unwrap();
+    builder.switch_to_block(bad).unwrap();
+    builder.trap().unwrap();
+
+    let func = builder.finish().unwrap();
+    assert_eq!(
+        func.to_string(),
+        "function %f(i64) -> i64 {\n\
+         block0(v0: i64):\n    \
+         switch v0, 1: block1, default: block2\n\n\
+         block1:\n    \
+         return v0\n\n\
+         block2:\n    \
+         trap\n}\n"
     );
 }

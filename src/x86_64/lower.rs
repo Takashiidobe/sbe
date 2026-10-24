@@ -58,8 +58,8 @@ fn condition_reg(
 
 struct Layout {
     block_index: HashMap<Block, usize>,
-    /// blocks holding the param moves of a `brif` edge, keyed by (source, is_then)
-    edge_index: HashMap<(Block, bool), usize>,
+    /// blocks holding the param moves of an edge, keyed by (source, position in `targets`)
+    edge_index: HashMap<(Block, usize), usize>,
 }
 
 impl Layout {
@@ -72,15 +72,10 @@ impl Layout {
         for &block in order {
             layout.block_index.insert(block, next);
             next += 1;
-            if let Some(Terminator::Brif {
-                then_args,
-                else_args,
-                ..
-            }) = func.block(block).terminator()
-            {
-                for (is_then, args) in [(false, else_args), (true, then_args)] {
-                    if !args.is_empty() {
-                        layout.edge_index.insert((block, is_then), next);
+            if let Some(terminator) = func.block(block).terminator() {
+                for (idx, (_, args)) in terminator.targets().iter().enumerate().rev() {
+                    if !args.is_empty() && !matches!(terminator, Terminator::Jump { .. }) {
+                        layout.edge_index.insert((block, idx), next);
                         next += 1;
                     }
                 }
@@ -297,41 +292,47 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                 ));
                 insts.push(jump_to(*dest));
             }
-            Terminator::Brif {
-                cond,
-                then_dest,
-                then_args,
-                else_dest,
-                else_args,
-            } => {
-                let mut targets = [Label(0); 2];
-                for (slot, (is_then, dest, args)) in [
-                    (false, *else_dest, else_args),
-                    (true, *then_dest, then_args),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    match layout.edge_index.get(&(block, is_then)) {
+            Terminator::Trap | Terminator::Unreachable => insts.push(Inst::Ud2),
+            terminator @ (Terminator::Brif { .. } | Terminator::Switch { .. }) => {
+                let targets = terminator.targets();
+                let mut labels = vec![Label(0); targets.len()];
+                for (idx, &(dest, args)) in targets.iter().enumerate().rev() {
+                    match layout.edge_index.get(&(block, idx)) {
                         Some(&edge) => {
-                            targets[slot] = Label(edge);
+                            labels[idx] = Label(edge);
                             let mut moves =
                                 parallel_moves(func.block(dest).params(), args, &mut next_vreg);
                             moves.push(jump_to(dest));
                             edges.push(VBlock { insts: moves });
                         }
-                        None => targets[slot] = Label(layout.block_index[&dest]),
+                        None => labels[idx] = Label(layout.block_index[&dest]),
                     }
                 }
-                let [else_target, then_target] = targets;
-                let cond = condition_reg(&mut insts, &mut next_vreg, func, *cond);
-                insts.push(Inst::Test { reg: cond });
-                insts.push(Inst::Jnz {
-                    target: then_target,
-                });
-                insts.push(Inst::Jmp {
-                    target: else_target,
-                });
+                match terminator {
+                    Terminator::Brif { cond, .. } => {
+                        let cond = condition_reg(&mut insts, &mut next_vreg, func, *cond);
+                        insts.push(Inst::Test { reg: cond });
+                        insts.push(Inst::Jnz { target: labels[0] });
+                        insts.push(Inst::Jmp { target: labels[1] });
+                    }
+                    Terminator::Switch { value, cases, .. } => {
+                        let ty = func.value_type(*value);
+                        let value = extended(&mut insts, &mut next_vreg, func, *value, false);
+                        for (case, &target) in cases.iter().zip(&labels) {
+                            let key = fresh(&mut next_vreg);
+                            insts.push(Inst::MovImm {
+                                dst: key,
+                                imm: ty.truncate(case.key) as i64,
+                            });
+                            insts.push(Inst::Cmp { a: value, b: key });
+                            insts.push(Inst::Jz { target });
+                        }
+                        insts.push(Inst::Jmp {
+                            target: labels[cases.len()],
+                        });
+                    }
+                    _ => unreachable!("matched above"),
+                }
             }
         }
         blocks.push(VBlock { insts });

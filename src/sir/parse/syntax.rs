@@ -189,6 +189,21 @@ impl<'a> Parser<'a> {
                     terminator = Some(TermAst::Jump(self.target()?));
                     break;
                 }
+                "trap" => {
+                    self.advance();
+                    terminator = Some(TermAst::Trap);
+                    break;
+                }
+                "unreachable" => {
+                    self.advance();
+                    terminator = Some(TermAst::Unreachable);
+                    break;
+                }
+                "switch" => {
+                    self.advance();
+                    terminator = Some(self.switch()?);
+                    break;
+                }
                 "brif" => {
                     self.advance();
                     let cond = self.name()?;
@@ -226,6 +241,31 @@ impl<'a> Parser<'a> {
             insts,
             terminator,
         })
+    }
+
+    fn switch(&mut self) -> PResult<TermAst<'a>> {
+        let value = self.name()?;
+        let mut cases = Vec::new();
+        loop {
+            self.expect(TokenKind::Comma)?;
+            if self.peek().text(self.src) == "default" {
+                self.advance();
+                self.expect(TokenKind::Colon)?;
+                let default = self.target()?;
+                return Ok(TermAst::Switch {
+                    value,
+                    cases,
+                    default,
+                });
+            }
+            let tok = self.expect(TokenKind::Int)?;
+            let key = tok.text(self.src).parse().map_err(|_| Failure {
+                kind: ParseErrorKind::InvalidInteger(tok.text(self.src).to_owned()),
+                span: tok.span(),
+            })?;
+            self.expect(TokenKind::Colon)?;
+            cases.push((key, self.target()?));
+        }
     }
 
     fn call_target(&mut self) -> PResult<(Name<'a>, Vec<Name<'a>>)> {

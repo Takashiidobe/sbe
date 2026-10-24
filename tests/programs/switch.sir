@@ -1,0 +1,90 @@
+function %classify(i64) -> i64 {
+block0(v0: i64):
+    switch v0, 0: block1, 1: block2(v0), 5: block3(v0, v0), -1: block1, default: block4(v0)
+
+block1:
+    v1 = iconst i64 10
+    return v1
+
+block2(v2: i64):
+    v3 = iconst i64 20
+    v4 = iadd v2, v3
+    return v4
+
+block3(v5: i64, v6: i64):
+    v7 = iadd v5, v6
+    v8 = iconst i64 3
+    v9 = imul v7, v8
+    return v9
+
+block4(v10: i64):
+    v11 = iadd v10, v10
+    return v11
+}
+
+function %by_byte(i64) -> i64 {
+block0(v0: i64):
+    v1 = ireduce i8 v0
+    switch v1, 1: block1, -1: block2, default: block3
+
+block1:
+    v2 = iconst i64 1
+    return v2
+
+block2:
+    v3 = iconst i64 2
+    return v3
+
+block3:
+    v4 = iconst i64 3
+    return v4
+}
+
+function %checked_div(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iconst i64 0
+    v3 = icmp eq v1, v2
+    brif v3, block1, block2
+
+block1:
+    trap
+
+block2:
+    v4 = sdiv v0, v1
+    return v4
+}
+
+function %ping(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iconst i64 0
+    switch v0, 0: block1(v1, v2), 1: block2(v1, v2), default: block4
+
+block1(v3: i64, v4: i64):
+    v5 = iconst i64 0
+    v6 = icmp sle v3, v5
+    brif v6, block3(v4), block5
+
+block5:
+    v7 = iconst i64 1
+    v8 = isub v3, v7
+    v9 = iadd v4, v7
+    jump block2(v8, v9)
+
+block2(v10: i64, v11: i64):
+    v12 = iconst i64 0
+    v13 = icmp sle v10, v12
+    brif v13, block3(v11), block6
+
+block6:
+    v14 = iconst i64 1
+    v15 = isub v10, v14
+    v16 = iadd v11, v14
+    jump block1(v15, v16)
+
+block3(v17: i64):
+    return v17
+
+block4:
+    v18 = iconst i64 -1
+    return v18
+}

@@ -165,3 +165,52 @@ int main(void) {
     );
     assert_eq!(stdout_of(&exe_path), expected);
 }
+
+#[test]
+fn module_switch_against_c_harness() {
+    let module = parse_module("switch", include_str!("programs/switch.sir")).unwrap();
+    let object = module_object(&compile_module(&module).unwrap()).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let object_path = dir.path().join("module.o");
+    let main_path = dir.path().join("main.c");
+    let exe_path = dir.path().join("prog");
+    std::fs::write(&object_path, object).unwrap();
+    std::fs::write(
+        &main_path,
+        r#"#include <stdio.h>
+extern long classify(long);
+extern long by_byte(long);
+extern long checked_div(long, long);
+extern long ping(long, long);
+int main(void) {
+    long xs[] = {0, 1, -1, 5, 2, 3, 100, -100};
+    for (int i = 0; i < 8; i++) printf("%ld ", classify(xs[i]));
+    printf("\n");
+    long bs[] = {0, 1, -1, 255, 257, -255, 256, 5};
+    for (int i = 0; i < 8; i++) printf("%ld ", by_byte(bs[i]));
+    printf("\n");
+    printf("%ld %ld %ld %ld %ld\n", checked_div(-9, 2), ping(0, 7), ping(1, 4), ping(2, 4), ping(1, -3));
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    run(Command::new("cc")
+        .args(["-O0", "-fno-omit-frame-pointer", "-o"])
+        .arg(&exe_path)
+        .arg(&main_path)
+        .arg(&object_path));
+
+    let row = |values: Vec<i64>| values.iter().map(|v| format!("{v} ")).collect::<String>();
+    let expected = format!(
+        "{}\n{}\n-4 7 4 -1 0\n",
+        row([0, 1, -1, 5, 2, 3, 100, -100]
+            .map(common::switch_classify)
+            .to_vec()),
+        row(common::SWITCH_BYTE_SAMPLES
+            .map(common::switch_by_byte)
+            .to_vec()),
+    );
+    assert_eq!(stdout_of(&exe_path), expected);
+}

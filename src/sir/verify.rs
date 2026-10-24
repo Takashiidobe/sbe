@@ -4,8 +4,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    Block, ControlFlow, FuncRef, Function, Inst, InstData, StackSlot, Terminator, Type, Value,
-    ValueDef,
+    Block, ControlFlow, FuncRef, Function, Inst, InstData, StackSlot, SwitchCase, Terminator, Type,
+    Value, ValueDef,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +94,10 @@ pub enum VerifyError {
     #[diagnostic(code(sir::verify::jump_arity))]
     JumpArity { from: Block, dest: Block },
 
+    #[error("{0} has two switch cases for the same key")]
+    #[diagnostic(code(sir::verify::duplicate_switch_key))]
+    DuplicateSwitchKey(Block),
+
     #[error("{from} jumps to {dest}, which does not exist")]
     #[diagnostic(code(sir::verify::unknown_block))]
     UnknownBlock { from: Block, dest: Block },
@@ -180,9 +184,13 @@ impl Verifier<'_> {
                         self.check_arg(Use::Terminator(block), value, ty);
                     }
                 }
-                Terminator::Jump { .. } | Terminator::Brif { .. } => {
+                Terminator::Trap | Terminator::Unreachable => {}
+                Terminator::Jump { .. } | Terminator::Brif { .. } | Terminator::Switch { .. } => {
                     if let Terminator::Brif { cond, .. } = terminator {
                         self.check_arg(Use::Terminator(block), *cond, Type::I8);
+                    }
+                    if let Terminator::Switch { value, cases, .. } = terminator {
+                        self.check_switch(block, *value, cases);
                     }
                     for (dest, args) in terminator.targets() {
                         self.check_edge(block, dest, args);
@@ -235,6 +243,20 @@ impl Verifier<'_> {
                         .push(VerifyError::UnknownStackSlot { user, slot: *slot });
                 }
             }
+        }
+    }
+
+    fn check_switch(&mut self, block: Block, value: Value, cases: &[SwitchCase]) {
+        let user = Use::Terminator(block);
+        if !self.func.contains_value(value) {
+            self.errors.push(VerifyError::UnknownValue { user, value });
+            return;
+        }
+        let ty = self.func.value_type(value);
+        let mut keys: Vec<u64> = cases.iter().map(|c| ty.truncate(c.key)).collect();
+        keys.sort_unstable();
+        if keys.windows(2).any(|w| w[0] == w[1]) {
+            self.errors.push(VerifyError::DuplicateSwitchKey(block));
         }
     }
 
