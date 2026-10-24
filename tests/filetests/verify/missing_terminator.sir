@@ -3,5 +3,5 @@
 ; check: block0 has no terminator
 function %f() {
 block0:
-    v0 = iconst 1
+    v0 = iconst i64 1
 }

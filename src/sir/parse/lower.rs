@@ -110,7 +110,15 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
         }
         for inst in &block.insts {
             let data = match &inst.op {
-                Op::Iconst(value) => InstData::Iconst { value: *value },
+                Op::Iconst(ty, value) => InstData::Iconst {
+                    ty: *ty,
+                    value: *value,
+                },
+                Op::Convert(op, ty, arg) => InstData::Convert {
+                    op: *op,
+                    ty: *ty,
+                    arg: names.value(*arg)?,
+                },
                 Op::Icmp(cc, a, b) => InstData::Icmp {
                     cc: *cc,
                     args: [names.value(*a)?, names.value(*b)?],

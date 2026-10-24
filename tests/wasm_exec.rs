@@ -60,7 +60,7 @@ fn builder_function_with_constants() {
 #[test]
 fn multiple_return_values() {
     let code = compile_text(
-        "function %pair(i64) -> i64, i64 {\nblock0(v0: i64):\n    v1 = iconst 1\n    v2 = iadd v0, v1\n    return v2, v0\n}\n",
+        "function %pair(i64) -> i64, i64 {\nblock0(v0: i64):\n    v1 = iconst i64 1\n    v2 = iadd v0, v1\n    return v2, v0\n}\n",
     );
     let (mut store, instance) = instantiate(&code);
     let pair = instance

@@ -1,8 +1,9 @@
 use std::collections::BTreeSet;
 
 use iced_x86::code_asm::{
-    AsmRegister8, AsmRegister64, CodeAssembler, al, cl, dil, dl, r8, r8b, r9, r9b, r10, r10b, r11,
-    r11b, rax, rcx, rdi, rdx, rsi, sil,
+    AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, CodeAssembler, al, ax, cl, cx, di,
+    dil, dl, dx, eax, ecx, edi, edx, esi, r8, r8b, r8d, r8w, r9, r9b, r9d, r9w, r10, r10b, r10d,
+    r10w, r11, r11b, r11d, r11w, rax, rcx, rdi, rdx, rsi, si, sil,
 };
 use iced_x86::{Formatter, IntelFormatter};
 
@@ -40,6 +41,34 @@ fn asm_reg8(reg: PReg) -> AsmRegister8 {
         PReg::R9 => r9b,
         PReg::R10 => r10b,
         PReg::R11 => r11b,
+    }
+}
+
+fn asm_reg16(reg: PReg) -> AsmRegister16 {
+    match reg {
+        PReg::Rax => ax,
+        PReg::Rcx => cx,
+        PReg::Rdx => dx,
+        PReg::Rsi => si,
+        PReg::Rdi => di,
+        PReg::R8 => r8w,
+        PReg::R9 => r9w,
+        PReg::R10 => r10w,
+        PReg::R11 => r11w,
+    }
+}
+
+fn asm_reg32(reg: PReg) -> AsmRegister32 {
+    match reg {
+        PReg::Rax => eax,
+        PReg::Rcx => ecx,
+        PReg::Rdx => edx,
+        PReg::Rsi => esi,
+        PReg::Rdi => edi,
+        PReg::R8 => r8d,
+        PReg::R9 => r9d,
+        PReg::R10 => r10d,
+        PReg::R11 => r11d,
     }
 }
 
@@ -118,6 +147,20 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
                     }
                 }
                 Inst::Movzx8 { dst } => a.movzx(asm_reg(dst), asm_reg8(dst)),
+                Inst::Ext {
+                    signed,
+                    bits,
+                    dst,
+                    src,
+                } => match (signed, bits) {
+                    (true, 8) => a.movsx(asm_reg(dst), asm_reg8(src)),
+                    (true, 16) => a.movsx(asm_reg(dst), asm_reg16(src)),
+                    (true, 32) => a.movsxd(asm_reg(dst), asm_reg32(src)),
+                    (false, 8) => a.movzx(asm_reg(dst), asm_reg8(src)),
+                    (false, 16) => a.movzx(asm_reg(dst), asm_reg16(src)),
+                    (false, 32) => a.mov(asm_reg32(dst), asm_reg32(src)),
+                    _ => unreachable!("extension from {bits} bits"),
+                },
                 Inst::Cmov { cc, dst, src } => {
                     let (dst, src) = (asm_reg(dst), asm_reg(src));
                     match cc {

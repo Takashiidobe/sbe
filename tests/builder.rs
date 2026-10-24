@@ -23,8 +23,8 @@ fn builds_constant_add() {
         func.to_string(),
         "function %sum() -> i64 {\n\
          block0:\n    \
-         v0 = iconst 10\n    \
-         v1 = iconst 20\n    \
+         v0 = iconst i64 10\n    \
+         v1 = iconst i64 20\n    \
          v2 = iadd v0, v1\n    \
          return v2\n\
          }\n"

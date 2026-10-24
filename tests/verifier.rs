@@ -65,7 +65,13 @@ fn use_before_def_in_same_block() {
             args: [later, later],
         },
     );
-    let defined_late = func.push_inst(entry, InstData::Iconst { value: 1 });
+    let defined_late = func.push_inst(
+        entry,
+        InstData::Iconst {
+            ty: Type::I64,
+            value: 1,
+        },
+    );
     assert_eq!(defined_late, later);
     func.set_terminator(
         entry,
@@ -96,7 +102,13 @@ fn use_of_value_from_non_dominating_block() {
     let entry = func.entry_block();
     let skipped = func.create_block();
     let target = func.create_block();
-    let hidden = func.push_inst(skipped, InstData::Iconst { value: 1 });
+    let hidden = func.push_inst(
+        skipped,
+        InstData::Iconst {
+            ty: Type::I64,
+            value: 1,
+        },
+    );
     func.set_terminator(
         skipped,
         Terminator::Jump {
@@ -132,7 +144,13 @@ fn definition_dominating_across_blocks_is_fine() {
     let mut func = Function::new("f", sig(0, 1));
     let entry = func.entry_block();
     let next = func.create_block();
-    let v = func.push_inst(entry, InstData::Iconst { value: 1 });
+    let v = func.push_inst(
+        entry,
+        InstData::Iconst {
+            ty: Type::I64,
+            value: 1,
+        },
+    );
     func.set_terminator(
         entry,
         Terminator::Jump {

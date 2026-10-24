@@ -63,7 +63,7 @@ int main(void) {
 #[test]
 fn c_harness_calls_function_with_wide_constants() {
     let out = link_and_run(
-        "function %wide() -> i64 {\nblock0:\n    v0 = iconst 10\n    v1 = iconst -20\n    v2 = iconst 1099511627776\n    v3 = iadd v0, v1\n    v4 = iadd v3, v2\n    return v4\n}\n",
+        "function %wide() -> i64 {\nblock0:\n    v0 = iconst i64 10\n    v1 = iconst i64 -20\n    v2 = iconst i64 1099511627776\n    v3 = iadd v0, v1\n    v4 = iadd v3, v2\n    return v4\n}\n",
         r#"#include <stdio.h>
 extern long wide(void);
 int main(void) {

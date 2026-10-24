@@ -12,16 +12,16 @@
 ; check: return
 function %pick(i64) -> i64 {
 block0(v0: i64):
-    v100 = iconst 0
+    v100 = iconst i64 0
     v101 = icmp ne v0, v100
     brif v101, block1, block2
 
 block1:
-    v1 = iconst 10
+    v1 = iconst i64 10
     jump block3(v1)
 
 block2:
-    v2 = iconst 20
+    v2 = iconst i64 20
     jump block3(v2)
 
 block3(v3: i64):

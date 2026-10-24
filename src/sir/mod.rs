@@ -12,7 +12,7 @@ pub use builder::{BuilderError, FunctionBuilder};
 pub use cfg::ControlFlow;
 pub use entities::{Block, Inst, Value};
 pub use function::{BlockData, Function, Signature, ValueDef};
-pub use inst::{BinOp, InstData, IntCC, Terminator, UnOp};
+pub use inst::{BinOp, CvtOp, InstData, IntCC, Terminator, UnOp};
 pub use parse::{ParseError, ParseErrorKind, parse_function};
 pub use types::Type;
 pub use verify::{Use, VerifyError, VerifyErrors, verify};

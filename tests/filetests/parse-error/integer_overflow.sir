@@ -2,6 +2,6 @@
 ; check: invalid integer `9223372036854775808`
 function %f() {
 block0:
-    v0 = iconst 9223372036854775808
+    v0 = iconst i64 9223372036854775808
     return
 }

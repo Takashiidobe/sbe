@@ -5,12 +5,9 @@
 ; check: Error: inst1 uses v1 of type i8, expected i64
 ; nextln:     Diagnostic severity: error
 ; check: diagnostic code: sir::verify::type_mismatch
-; nextln: Error: inst1 uses v1 of type i8, expected i64
-; nextln:     Diagnostic severity: error
-; check: diagnostic code: sir::verify::type_mismatch
 function %f(i64) -> i8 {
 block0(v0: i64):
     v1 = icmp eq v0, v0
-    v2 = icmp eq v1, v1
+    v2 = icmp eq v0, v1
     return v2
 }

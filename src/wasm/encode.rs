@@ -5,7 +5,8 @@ use wasm_encoder::{
 
 use super::error::CompileError;
 use crate::sir::{
-    BinOp, Block, ControlFlow, Function, InstData, IntCC, Terminator, Type, UnOp, Value, verify,
+    BinOp, Block, ControlFlow, CvtOp, Function, InstData, IntCC, Terminator, Type, UnOp, Value,
+    ValueDef, verify,
 };
 
 pub struct Compiled {
@@ -37,6 +38,38 @@ impl Emitter<'_> {
         self.op(Instruction::LocalGet(self.local_of[value.index()]));
     }
 
+    fn ty(&self, value: Value) -> Type {
+        self.func.value_type(value)
+    }
+
+    /// i8 and i16 live in i32 locals with undefined upper bits, so the bits that matter are
+    /// extended before an op that can see them
+    fn get_extended(&mut self, value: Value, signed: bool) {
+        self.get(value);
+        match (self.ty(value), signed) {
+            (Type::I8, true) => self.op(Instruction::I32Extend8S),
+            (Type::I16, true) => self.op(Instruction::I32Extend16S),
+            (ty @ (Type::I8 | Type::I16), false) => {
+                self.op(Instruction::I32Const((1 << ty.bits()) - 1));
+                self.op(Instruction::I32And);
+            }
+            _ => {}
+        }
+    }
+
+    // an icmp result is exactly 0 or 1; any other i8 may carry garbage above bit 7
+    fn get_cond(&mut self, value: Value) {
+        self.get(value);
+        let from_icmp = match self.func.value_def(value) {
+            ValueDef::Result(inst) => matches!(self.func.inst(inst), InstData::Icmp { .. }),
+            ValueDef::Param(..) => false,
+        };
+        if !from_icmp {
+            self.op(Instruction::I32Const(0xff));
+            self.op(Instruction::I32And);
+        }
+    }
+
     // wasm's `i64.rem_s` yields 0 for `i64::MIN % -1`, but the ir (like x86 `idiv`) traps
     fn trap_on_signed_overflow(&mut self, a: Value, b: Value) {
         self.get(b);
@@ -51,68 +84,161 @@ impl Emitter<'_> {
         self.op(Instruction::End);
     }
 
+    fn emit_binary(&mut self, op: BinOp, ty: Type, a: Value, b: Value) {
+        let signed = matches!(op, BinOp::Sshr | BinOp::Sdiv | BinOp::Srem);
+        let shift = matches!(op, BinOp::Ishl | BinOp::Ushr | BinOp::Sshr);
+        // i32 division is done in i64 so that the overflow case wraps like i8 and i16 do
+        let widen = ty == Type::I32 && signed && !shift;
+        let wide = ty == Type::I64;
+
+        if wide && op == BinOp::Srem {
+            self.trap_on_signed_overflow(a, b);
+        }
+        let extended = !matches!(op, BinOp::Iadd | BinOp::Isub | BinOp::Imul | BinOp::Band)
+            && !matches!(op, BinOp::Bor | BinOp::Bxor | BinOp::Ishl);
+        for (i, value) in [a, b].into_iter().enumerate() {
+            if extended && !(shift && i == 1) {
+                self.get_extended(value, signed);
+            } else {
+                self.get(value);
+            }
+            if widen {
+                self.op(Instruction::I64ExtendI32S);
+            }
+            if shift && i == 1 && matches!(ty, Type::I8 | Type::I16) {
+                self.op(Instruction::I32Const(ty.bits() as i32 - 1));
+                self.op(Instruction::I32And);
+            }
+        }
+        self.op(match (wide || widen, op) {
+            (true, BinOp::Iadd) => Instruction::I64Add,
+            (true, BinOp::Isub) => Instruction::I64Sub,
+            (true, BinOp::Imul) => Instruction::I64Mul,
+            (true, BinOp::Band) => Instruction::I64And,
+            (true, BinOp::Bor) => Instruction::I64Or,
+            (true, BinOp::Bxor) => Instruction::I64Xor,
+            (true, BinOp::Ishl) => Instruction::I64Shl,
+            (true, BinOp::Ushr) => Instruction::I64ShrU,
+            (true, BinOp::Sshr) => Instruction::I64ShrS,
+            (true, BinOp::Sdiv) => Instruction::I64DivS,
+            (true, BinOp::Udiv) => Instruction::I64DivU,
+            (true, BinOp::Srem) => Instruction::I64RemS,
+            (true, BinOp::Urem) => Instruction::I64RemU,
+            (false, BinOp::Iadd) => Instruction::I32Add,
+            (false, BinOp::Isub) => Instruction::I32Sub,
+            (false, BinOp::Imul) => Instruction::I32Mul,
+            (false, BinOp::Band) => Instruction::I32And,
+            (false, BinOp::Bor) => Instruction::I32Or,
+            (false, BinOp::Bxor) => Instruction::I32Xor,
+            (false, BinOp::Ishl) => Instruction::I32Shl,
+            (false, BinOp::Ushr) => Instruction::I32ShrU,
+            (false, BinOp::Sshr) => Instruction::I32ShrS,
+            (false, BinOp::Sdiv) => Instruction::I32DivS,
+            (false, BinOp::Udiv) => Instruction::I32DivU,
+            (false, BinOp::Srem) => Instruction::I32RemS,
+            (false, BinOp::Urem) => Instruction::I32RemU,
+        });
+        if widen {
+            self.op(Instruction::I32WrapI64);
+        }
+    }
+
+    fn emit_icmp(&mut self, cc: IntCC, a: Value, b: Value) {
+        let signed = matches!(cc, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge);
+        self.get_extended(a, signed);
+        self.get_extended(b, signed);
+        let wide = self.ty(a) == Type::I64;
+        self.op(match (wide, cc) {
+            (true, IntCC::Eq) => Instruction::I64Eq,
+            (true, IntCC::Ne) => Instruction::I64Ne,
+            (true, IntCC::Slt) => Instruction::I64LtS,
+            (true, IntCC::Sle) => Instruction::I64LeS,
+            (true, IntCC::Sgt) => Instruction::I64GtS,
+            (true, IntCC::Sge) => Instruction::I64GeS,
+            (true, IntCC::Ult) => Instruction::I64LtU,
+            (true, IntCC::Ule) => Instruction::I64LeU,
+            (true, IntCC::Ugt) => Instruction::I64GtU,
+            (true, IntCC::Uge) => Instruction::I64GeU,
+            (false, IntCC::Eq) => Instruction::I32Eq,
+            (false, IntCC::Ne) => Instruction::I32Ne,
+            (false, IntCC::Slt) => Instruction::I32LtS,
+            (false, IntCC::Sle) => Instruction::I32LeS,
+            (false, IntCC::Sgt) => Instruction::I32GtS,
+            (false, IntCC::Sge) => Instruction::I32GeS,
+            (false, IntCC::Ult) => Instruction::I32LtU,
+            (false, IntCC::Ule) => Instruction::I32LeU,
+            (false, IntCC::Ugt) => Instruction::I32GtU,
+            (false, IntCC::Uge) => Instruction::I32GeU,
+        });
+    }
+
+    fn emit_convert(&mut self, op: CvtOp, ty: Type, arg: Value) {
+        let to_i64 = ty == Type::I64;
+        match op {
+            CvtOp::Sextend | CvtOp::Uextend => {
+                let signed = op == CvtOp::Sextend;
+                self.get_extended(arg, signed);
+                if to_i64 && signed {
+                    self.op(Instruction::I64ExtendI32S);
+                } else if to_i64 {
+                    self.op(Instruction::I64ExtendI32U);
+                }
+            }
+            CvtOp::Ireduce => {
+                self.get(arg);
+                if self.ty(arg) == Type::I64 {
+                    self.op(Instruction::I32WrapI64);
+                }
+            }
+        }
+    }
+
     fn emit_insts(&mut self, block: Block) {
         for &inst in self.func.block(block).insts() {
             let result = self.local_of[self.func.inst_result(inst).index()];
             match self.func.inst(inst) {
-                InstData::Iconst { value } => self.op(Instruction::I64Const(*value)),
-                InstData::Icmp { cc, args: [a, b] } => {
-                    self.get(*a);
-                    self.get(*b);
-                    self.op(match cc {
-                        IntCC::Eq => Instruction::I64Eq,
-                        IntCC::Ne => Instruction::I64Ne,
-                        IntCC::Slt => Instruction::I64LtS,
-                        IntCC::Sle => Instruction::I64LeS,
-                        IntCC::Sgt => Instruction::I64GtS,
-                        IntCC::Sge => Instruction::I64GeS,
-                        IntCC::Ult => Instruction::I64LtU,
-                        IntCC::Ule => Instruction::I64LeU,
-                        IntCC::Ugt => Instruction::I64GtU,
-                        IntCC::Uge => Instruction::I64GeU,
-                    });
-                }
+                InstData::Iconst {
+                    ty: Type::I64,
+                    value,
+                } => self.op(Instruction::I64Const(*value)),
+                InstData::Iconst { value, .. } => self.op(Instruction::I32Const(*value as i32)),
+                InstData::Convert { op, ty, arg } => self.emit_convert(*op, *ty, *arg),
+                InstData::Icmp { cc, args: [a, b] } => self.emit_icmp(*cc, *a, *b),
                 InstData::Select {
                     args: [cond, then_value, else_value],
                 } => {
                     self.get(*then_value);
                     self.get(*else_value);
-                    self.get(*cond);
+                    self.get_cond(*cond);
                     self.op(Instruction::Select);
                 }
-                InstData::Unary { op, arg } => match op {
-                    UnOp::Ineg => {
-                        self.op(Instruction::I64Const(0));
-                        self.get(*arg);
-                        self.op(Instruction::I64Sub);
+                InstData::Unary { op, arg } => {
+                    let wide = self.ty(*arg) == Type::I64;
+                    match (op, wide) {
+                        (UnOp::Ineg, true) => {
+                            self.op(Instruction::I64Const(0));
+                            self.get(*arg);
+                            self.op(Instruction::I64Sub);
+                        }
+                        (UnOp::Ineg, false) => {
+                            self.op(Instruction::I32Const(0));
+                            self.get(*arg);
+                            self.op(Instruction::I32Sub);
+                        }
+                        (UnOp::Bnot, true) => {
+                            self.get(*arg);
+                            self.op(Instruction::I64Const(-1));
+                            self.op(Instruction::I64Xor);
+                        }
+                        (UnOp::Bnot, false) => {
+                            self.get(*arg);
+                            self.op(Instruction::I32Const(-1));
+                            self.op(Instruction::I32Xor);
+                        }
                     }
-                    UnOp::Bnot => {
-                        self.get(*arg);
-                        self.op(Instruction::I64Const(-1));
-                        self.op(Instruction::I64Xor);
-                    }
-                },
+                }
                 InstData::Binary { op, args: [a, b] } => {
-                    if *op == BinOp::Srem {
-                        self.trap_on_signed_overflow(*a, *b);
-                    }
-                    self.get(*a);
-                    self.get(*b);
-                    self.op(match op {
-                        BinOp::Iadd => Instruction::I64Add,
-                        BinOp::Isub => Instruction::I64Sub,
-                        BinOp::Imul => Instruction::I64Mul,
-                        BinOp::Band => Instruction::I64And,
-                        BinOp::Bor => Instruction::I64Or,
-                        BinOp::Bxor => Instruction::I64Xor,
-                        BinOp::Ishl => Instruction::I64Shl,
-                        BinOp::Ushr => Instruction::I64ShrU,
-                        BinOp::Sshr => Instruction::I64ShrS,
-                        BinOp::Sdiv => Instruction::I64DivS,
-                        BinOp::Udiv => Instruction::I64DivU,
-                        BinOp::Srem => Instruction::I64RemS,
-                        BinOp::Urem => Instruction::I64RemU,
-                    });
+                    self.emit_binary(*op, self.ty(*a), *a, *b);
                 }
             }
             self.op(Instruction::LocalSet(result));
@@ -188,7 +314,7 @@ impl Emitter<'_> {
                 else_dest,
                 else_args,
             } => {
-                self.get(*cond);
+                self.get_cond(*cond);
                 self.op(Instruction::If(BlockType::Empty));
                 ctx.push(Frame::Other);
                 self.do_branch(x, *then_dest, then_args, ctx);
@@ -251,7 +377,7 @@ impl Emitter<'_> {
                     else_dest,
                     else_args,
                 } => {
-                    self.get(*cond);
+                    self.get_cond(*cond);
                     self.op(Instruction::If(BlockType::Empty));
                     self.dispatch_edge(
                         *then_dest,
@@ -379,7 +505,7 @@ pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
 
 fn val_type(ty: Type) -> ValType {
     match ty {
-        Type::I8 => ValType::I32,
+        Type::I8 | Type::I16 | Type::I32 => ValType::I32,
         Type::I64 => ValType::I64,
     }
 }

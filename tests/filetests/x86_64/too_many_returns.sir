@@ -2,6 +2,6 @@
 ; check: x86_64 supports at most one return value, found 2
 function %f() -> i64, i64 {
 block0:
-    v0 = iconst 1
+    v0 = iconst i64 1
     return v0, v0
 }

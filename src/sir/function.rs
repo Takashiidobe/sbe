@@ -97,7 +97,8 @@ impl Function {
 
     pub fn push_inst(&mut self, block: Block, data: InstData) -> Value {
         let inst = Inst::from_index(self.insts.len());
-        let ty = data.result_type(|v| self.value_type(v));
+        // a forward reference has no type yet; the verifier reports it, so any guess will do
+        let ty = data.result_type(|v| self.values.get(v.index()).map_or(Type::I64, |e| e.ty));
         let result = self.new_value(ty, ValueDef::Result(inst));
         self.insts.push(InstEntry { data, result });
         self.blocks[block.index()].insts.push(inst);

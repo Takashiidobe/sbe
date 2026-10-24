@@ -9,6 +9,6 @@ block1:
     return v0
 
 block2:
-    v0 = iconst 1
+    v0 = iconst i64 1
     jump block1
 }

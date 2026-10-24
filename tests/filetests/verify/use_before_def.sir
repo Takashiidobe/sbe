@@ -4,6 +4,6 @@
 function %f() -> i64 {
 block0:
     v0 = iadd v1, v1
-    v1 = iconst 1
+    v1 = iconst i64 1
     return v0
 }

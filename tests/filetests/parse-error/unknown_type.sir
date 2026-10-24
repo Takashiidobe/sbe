@@ -1,6 +1,6 @@
 ; test parse-error
-; check: unknown type `i32`
-function %f(i32) {
+; check: unknown type `i128`
+function %f(i128) {
 block0:
     return
 }

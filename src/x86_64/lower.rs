@@ -2,10 +2,58 @@ use std::collections::HashMap;
 
 use super::error::CompileError;
 use super::vcode::{AluOp, Cc, Inst, Label, PReg, Reg, ShiftOp, UnaryOp, VBlock, VCode, VReg};
-use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, IntCC, Terminator, UnOp, Value};
+use crate::sir::{
+    BinOp, Block, ControlFlow, CvtOp, Function, InstData, IntCC, Terminator, Type, UnOp, Value,
+    ValueDef,
+};
 
 fn vreg(value: Value) -> Reg {
     Reg::V(VReg::from_index(value.index()))
+}
+
+fn fresh(next_vreg: &mut usize) -> Reg {
+    *next_vreg += 1;
+    Reg::V(VReg::from_index(*next_vreg - 1))
+}
+
+/// narrow values keep undefined upper bits, so ops that can see them read an extended copy
+fn extended(
+    insts: &mut Vec<Inst<Reg>>,
+    next_vreg: &mut usize,
+    func: &Function,
+    value: Value,
+    signed: bool,
+) -> Reg {
+    let ty = func.value_type(value);
+    if ty == Type::I64 {
+        return vreg(value);
+    }
+    let dst = fresh(next_vreg);
+    insts.push(Inst::Ext {
+        signed,
+        bits: ty.bits() as u8,
+        dst,
+        src: vreg(value),
+    });
+    dst
+}
+
+// an icmp result is exactly 0 or 1; any other i8 may carry garbage above bit 7
+fn condition_reg(
+    insts: &mut Vec<Inst<Reg>>,
+    next_vreg: &mut usize,
+    func: &Function,
+    cond: Value,
+) -> Reg {
+    let from_icmp = match func.value_def(cond) {
+        ValueDef::Result(inst) => matches!(func.inst(inst), InstData::Icmp { .. }),
+        ValueDef::Param(..) => false,
+    };
+    if from_icmp {
+        vreg(cond)
+    } else {
+        extended(insts, next_vreg, func, cond, false)
+    }
 }
 
 struct Layout {
@@ -111,15 +159,15 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         for &inst in data.insts() {
             let result = vreg(func.inst_result(inst));
             match func.inst(inst) {
-                InstData::Iconst { value } => insts.push(Inst::MovImm {
+                InstData::Iconst { value, .. } => insts.push(Inst::MovImm {
                     dst: result,
                     imm: *value,
                 }),
                 InstData::Icmp { cc, args: [a, b] } => {
-                    insts.push(Inst::Cmp {
-                        a: vreg(*a),
-                        b: vreg(*b),
-                    });
+                    let signed = matches!(cc, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge);
+                    let a = extended(&mut insts, &mut next_vreg, func, *a, signed);
+                    let b = extended(&mut insts, &mut next_vreg, func, *b, signed);
+                    insts.push(Inst::Cmp { a, b });
                     insts.push(Inst::Setcc {
                         cc: condition(*cc),
                         dst: result,
@@ -133,7 +181,8 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                         dst: result,
                         src: vreg(*else_value),
                     });
-                    insts.push(Inst::Test { reg: vreg(*cond) });
+                    let cond = condition_reg(&mut insts, &mut next_vreg, func, *cond);
+                    insts.push(Inst::Test { reg: cond });
                     insts.push(Inst::Cmov {
                         cc: Cc::Ne,
                         dst: result,
@@ -153,8 +202,38 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                         dst: result,
                     });
                 }
+                InstData::Convert { op, arg, .. } => match op {
+                    CvtOp::Sextend | CvtOp::Uextend => insts.push(Inst::Ext {
+                        signed: *op == CvtOp::Sextend,
+                        bits: func.value_type(*arg).bits() as u8,
+                        dst: result,
+                        src: vreg(*arg),
+                    }),
+                    CvtOp::Ireduce => insts.push(Inst::Mov {
+                        dst: result,
+                        src: vreg(*arg),
+                    }),
+                },
                 InstData::Binary { op, args: [a, b] } => {
-                    lower_binary(&mut insts, *op, result, vreg(*a), vreg(*b));
+                    let ty = func.value_type(*a);
+                    let signed = matches!(op, BinOp::Sshr | BinOp::Sdiv | BinOp::Srem);
+                    let exts = |op: &BinOp| match op {
+                        BinOp::Ushr | BinOp::Sshr => (true, false),
+                        BinOp::Sdiv | BinOp::Udiv | BinOp::Srem | BinOp::Urem => (true, true),
+                        _ => (false, false),
+                    };
+                    let (ext_a, ext_b) = exts(op);
+                    let ra = if ext_a {
+                        extended(&mut insts, &mut next_vreg, func, *a, signed)
+                    } else {
+                        vreg(*a)
+                    };
+                    let rb = if ext_b {
+                        extended(&mut insts, &mut next_vreg, func, *b, signed)
+                    } else {
+                        vreg(*b)
+                    };
+                    lower_binary(&mut insts, &mut next_vreg, *op, ty, result, ra, rb);
                 }
             }
         }
@@ -210,7 +289,8 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                     }
                 }
                 let [else_target, then_target] = targets;
-                insts.push(Inst::Test { reg: vreg(*cond) });
+                let cond = condition_reg(&mut insts, &mut next_vreg, func, *cond);
+                insts.push(Inst::Test { reg: cond });
                 insts.push(Inst::Jnz {
                     target: then_target,
                 });
@@ -229,7 +309,15 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
     })
 }
 
-fn lower_binary(insts: &mut Vec<Inst<Reg>>, op: BinOp, result: Reg, a: Reg, b: Reg) {
+fn lower_binary(
+    insts: &mut Vec<Inst<Reg>>,
+    next_vreg: &mut usize,
+    op: BinOp,
+    ty: Type,
+    result: Reg,
+    a: Reg,
+    b: Reg,
+) {
     let alu = |insts: &mut Vec<Inst<Reg>>, op| {
         insts.push(Inst::Mov {
             dst: result,
@@ -241,13 +329,25 @@ fn lower_binary(insts: &mut Vec<Inst<Reg>>, op: BinOp, result: Reg, a: Reg, b: R
             src: b,
         });
     };
-    let shift = |insts: &mut Vec<Inst<Reg>>, op| {
+    let mut shift = |insts: &mut Vec<Inst<Reg>>, op| {
         let count = Reg::P(PReg::Rcx);
         insts.push(Inst::Mov {
             dst: result,
             src: a,
         });
         insts.push(Inst::Mov { dst: count, src: b });
+        if ty != Type::I64 {
+            let mask = fresh(next_vreg);
+            insts.push(Inst::MovImm {
+                dst: mask,
+                imm: i64::from(ty.bits()) - 1,
+            });
+            insts.push(Inst::Alu {
+                op: AluOp::And,
+                dst: count,
+                src: mask,
+            });
+        }
         insts.push(Inst::Shift {
             op,
             dst: result,

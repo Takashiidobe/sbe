@@ -2,7 +2,7 @@
 ; check: block0 jumps to block2 with the wrong number of args
 function %f(i64) {
 block0(v0: i64):
-    v100 = iconst 0
+    v100 = iconst i64 0
     v101 = icmp ne v0, v100
     brif v101, block1, block2(v0)
 

@@ -1,7 +1,7 @@
 use super::ast::{BlockAst, FunctionAst, InstAst, Name, Op, Param, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
 use super::lexer::{Token, TokenKind};
-use crate::sir::{BinOp, IntCC, Type, UnOp};
+use crate::sir::{BinOp, CvtOp, IntCC, Type, UnOp};
 
 pub(super) struct Parser<'a> {
     src: &'a str,
@@ -67,14 +67,10 @@ impl<'a> Parser<'a> {
 
     fn ty(&mut self) -> PResult<Type> {
         let tok = self.expect(TokenKind::Ident)?;
-        match tok.text(self.src) {
-            "i8" => Ok(Type::I8),
-            "i64" => Ok(Type::I64),
-            other => Err(Failure {
-                kind: ParseErrorKind::UnknownType(other.to_owned()),
-                span: tok.span(),
-            }),
-        }
+        Type::from_name(tok.text(self.src)).ok_or_else(|| Failure {
+            kind: ParseErrorKind::UnknownType(tok.text(self.src).to_owned()),
+            span: tok.span(),
+        })
     }
 
     fn name(&mut self) -> PResult<Name<'a>> {
@@ -146,12 +142,13 @@ impl<'a> Parser<'a> {
         let op_tok = self.expect(TokenKind::Ident)?;
         let op = match op_tok.text(self.src) {
             "iconst" => {
+                let ty = self.ty()?;
                 let tok = self.expect(TokenKind::Int)?;
                 let value = tok.text(self.src).parse().map_err(|_| Failure {
                     kind: ParseErrorKind::InvalidInteger(tok.text(self.src).to_owned()),
                     span: tok.span(),
                 })?;
-                Op::Iconst(value)
+                Op::Iconst(ty, value)
             }
             "icmp" => {
                 let cc_tok = self.expect(TokenKind::Ident)?;
@@ -173,7 +170,10 @@ impl<'a> Parser<'a> {
                 Op::Select(cond, then_value, self.name()?)
             }
             other => {
-                if let Some(op) = UnOp::from_mnemonic(other) {
+                if let Some(op) = CvtOp::from_mnemonic(other) {
+                    let ty = self.ty()?;
+                    Op::Convert(op, ty, self.name()?)
+                } else if let Some(op) = UnOp::from_mnemonic(other) {
                     Op::Unary(op, self.name()?)
                 } else if let Some(op) = BinOp::from_mnemonic(other) {
                     let a = self.name()?;

@@ -2,16 +2,16 @@
 ; check: ok
 function %f(i64) -> i64 {
 block0(v0: i64):
-    v100 = iconst 0
+    v100 = iconst i64 0
     v101 = icmp ne v0, v100
     brif v101, block1, block2
 
 block1:
-    v1 = iconst 1
+    v1 = iconst i64 1
     jump block3(v1)
 
 block2:
-    v2 = iconst 2
+    v2 = iconst i64 2
     jump block3(v2)
 
 block3(v3: i64):

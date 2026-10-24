@@ -4,15 +4,15 @@
 ; check: ret
 function %nine() -> i64 {
 block0:
-    v0 = iconst 0
-    v1 = iconst 1
-    v2 = iconst 2
-    v3 = iconst 3
-    v4 = iconst 4
-    v5 = iconst 5
-    v6 = iconst 6
-    v7 = iconst 7
-    v8 = iconst 8
+    v0 = iconst i64 0
+    v1 = iconst i64 1
+    v2 = iconst i64 2
+    v3 = iconst i64 3
+    v4 = iconst i64 4
+    v5 = iconst i64 5
+    v6 = iconst i64 6
+    v7 = iconst i64 7
+    v8 = iconst i64 8
     v9 = iadd v0, v1
     v10 = iadd v9, v2
     v11 = iadd v10, v3

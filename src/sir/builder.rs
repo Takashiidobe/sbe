@@ -2,7 +2,7 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    BinOp, Block, Function, InstData, IntCC, Signature, Terminator, Type, UnOp, Value,
+    BinOp, Block, CvtOp, Function, InstData, IntCC, Signature, Terminator, Type, UnOp, Value,
     VerifyErrors, verify::verify,
 };
 
@@ -66,7 +66,16 @@ impl FunctionBuilder {
     }
 
     pub fn iconst(&mut self, value: i64) -> Result<Value, BuilderError> {
-        self.emit(InstData::Iconst { value })
+        self.iconst_typed(Type::I64, value)
+    }
+
+    pub fn iconst_typed(&mut self, ty: Type, value: i64) -> Result<Value, BuilderError> {
+        self.emit(InstData::Iconst { ty, value })
+    }
+
+    pub fn convert(&mut self, op: CvtOp, ty: Type, arg: Value) -> Result<Value, BuilderError> {
+        self.check_value(arg)?;
+        self.emit(InstData::Convert { op, ty, arg })
     }
 
     pub fn unary(&mut self, op: UnOp, arg: Value) -> Result<Value, BuilderError> {

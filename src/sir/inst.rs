@@ -1,7 +1,8 @@
 use super::{Block, Type, Value};
 
-/// shift amounts are taken modulo 64. `sdiv`, `udiv`, `srem` and `urem` trap on a zero divisor,
-/// and the signed forms also trap on `i64::MIN` by `-1`.
+/// binary ops take two operands of one integer type and yield that type. shift amounts are taken
+/// modulo the type's width. `sdiv`, `udiv`, `srem` and `urem` trap on a zero divisor. the signed
+/// forms trap on `i64::MIN` by `-1`; for narrower types that overflow wraps instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinOp {
     Iadd,
@@ -81,6 +82,37 @@ impl UnOp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CvtOp {
+    Sextend,
+    Uextend,
+    Ireduce,
+}
+
+impl CvtOp {
+    const ALL: [CvtOp; 3] = [CvtOp::Sextend, CvtOp::Uextend, CvtOp::Ireduce];
+
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            CvtOp::Sextend => "sextend",
+            CvtOp::Uextend => "uextend",
+            CvtOp::Ireduce => "ireduce",
+        }
+    }
+
+    pub fn from_mnemonic(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|op| op.mnemonic() == text)
+    }
+
+    /// extends must widen and reduces must narrow
+    pub fn accepts(self, from: Type, to: Type) -> bool {
+        match self {
+            CvtOp::Sextend | CvtOp::Uextend => to.bits() > from.bits(),
+            CvtOp::Ireduce => to.bits() < from.bits(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IntCC {
     Eq,
     Ne,
@@ -130,7 +162,9 @@ impl IntCC {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstData {
+    /// `value` is truncated to `ty`
     Iconst {
+        ty: Type,
         value: i64,
     },
     Unary {
@@ -141,7 +175,13 @@ pub enum InstData {
         op: BinOp,
         args: [Value; 2],
     },
-    /// compares two i64s and yields an i8 that is exactly 0 or 1
+    /// `ty` is the result type; `op` must widen or narrow the argument accordingly
+    Convert {
+        op: CvtOp,
+        ty: Type,
+        arg: Value,
+    },
+    /// compares two ints of one type and yields an i8 that is exactly 0 or 1
     Icmp {
         cc: IntCC,
         args: [Value; 2],
@@ -155,7 +195,9 @@ pub enum InstData {
 impl InstData {
     pub fn result_type(&self, type_of: impl Fn(Value) -> Type) -> Type {
         match self {
-            InstData::Iconst { .. } | InstData::Unary { .. } | InstData::Binary { .. } => Type::I64,
+            InstData::Iconst { ty, .. } | InstData::Convert { ty, .. } => *ty,
+            InstData::Unary { arg, .. } => type_of(*arg),
+            InstData::Binary { args: [a, _], .. } => type_of(*a),
             InstData::Icmp { .. } => Type::I8,
             InstData::Select {
                 args: [_, then_value, _],
@@ -166,7 +208,9 @@ impl InstData {
     pub fn args(&self) -> &[Value] {
         match self {
             InstData::Iconst { .. } => &[],
-            InstData::Unary { arg, .. } => std::slice::from_ref(arg),
+            InstData::Unary { arg, .. } | InstData::Convert { arg, .. } => {
+                std::slice::from_ref(arg)
+            }
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => args,
             InstData::Select { args } => args,
         }

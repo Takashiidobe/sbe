@@ -56,7 +56,13 @@ fn instruction_results_are_single_definitions() {
 fn extra_blocks_take_params_instead_of_phis() {
     let mut func = add_function();
     let entry = func.entry_block();
-    let one = func.push_inst(entry, InstData::Iconst { value: 1 });
+    let one = func.push_inst(
+        entry,
+        InstData::Iconst {
+            ty: Type::I64,
+            value: 1,
+        },
+    );
     let next = func.create_block();
     let carried = func.append_block_param(next, Type::I64);
     func.set_terminator(

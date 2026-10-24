@@ -65,7 +65,10 @@ impl Display for Function {
             for &inst in data.insts() {
                 write!(f, "    {} = ", self.inst_result(inst))?;
                 match self.inst(inst) {
-                    InstData::Iconst { value } => writeln!(f, "iconst {value}")?,
+                    InstData::Iconst { ty, value } => writeln!(f, "iconst {ty} {value}")?,
+                    InstData::Convert { op, ty, arg } => {
+                        writeln!(f, "{} {ty} {arg}", op.mnemonic())?
+                    }
                     InstData::Icmp { cc, args: [a, b] } => {
                         writeln!(f, "icmp {} {a}, {b}", cc.mnemonic())?
                     }

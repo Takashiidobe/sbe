@@ -1,9 +1,9 @@
 function %f() -> i64 {
 block0:
-    v0 = iconst 7
+    v0 = iconst i64 7
     return v0
 
 block1:
-    v1 = iconst 9
+    v1 = iconst i64 9
     jump block1
 }

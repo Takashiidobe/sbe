@@ -230,6 +230,13 @@ pub enum Inst<R> {
     Movzx8 {
         dst: R,
     },
+    /// extends the low `bits` of `src` into the full width of `dst`
+    Ext {
+        signed: bool,
+        bits: u8,
+        dst: R,
+        src: R,
+    },
     Cmov {
         cc: Cc,
         dst: R,
@@ -267,6 +274,7 @@ impl<R: Copy> Inst<R> {
             Inst::Cmp { a, b } => vec![a, b],
             Inst::Setcc { .. } => vec![],
             Inst::Movzx8 { dst } => vec![dst],
+            Inst::Ext { src, .. } => vec![src],
             Inst::Cmov { dst, src, .. } => vec![dst, src],
             Inst::Div {
                 divisor, lo, hi, ..
@@ -284,6 +292,7 @@ impl<R: Copy> Inst<R> {
             | Inst::Unary { dst, .. }
             | Inst::Setcc { dst, .. }
             | Inst::Movzx8 { dst }
+            | Inst::Ext { dst, .. }
             | Inst::Cmov { dst, .. } => vec![dst],
             Inst::Cqo { hi, .. } => vec![hi],
             Inst::Div { lo, hi, .. } => vec![lo, hi],
@@ -323,6 +332,17 @@ impl<R: Copy> Inst<R> {
             Inst::Cmp { a, b } => Inst::Cmp { a: f(a), b: f(b) },
             Inst::Setcc { cc, dst } => Inst::Setcc { cc, dst: f(dst) },
             Inst::Movzx8 { dst } => Inst::Movzx8 { dst: f(dst) },
+            Inst::Ext {
+                signed,
+                bits,
+                dst,
+                src,
+            } => Inst::Ext {
+                signed,
+                bits,
+                dst: f(dst),
+                src: f(src),
+            },
             Inst::Cmov { cc, dst, src } => Inst::Cmov {
                 cc,
                 dst: f(dst),
@@ -363,6 +383,16 @@ impl<R: fmt::Display> fmt::Display for Inst<R> {
             Inst::Cmp { a, b } => write!(f, "cmp {a}, {b}"),
             Inst::Setcc { cc, dst } => write!(f, "set{} {dst}", cc.suffix()),
             Inst::Movzx8 { dst } => write!(f, "movzx {dst}, {dst}"),
+            Inst::Ext {
+                signed,
+                bits,
+                dst,
+                src,
+            } => write!(
+                f,
+                "{}{bits} {dst}, {src}",
+                if *signed { "movsx" } else { "movzx" }
+            ),
             Inst::Cmov { cc, dst, src } => write!(f, "cmov{} {dst}, {src}", cc.suffix()),
             Inst::Div {
                 signed, divisor, ..

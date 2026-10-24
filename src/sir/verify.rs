@@ -51,6 +51,15 @@ pub enum VerifyError {
         found: Type,
     },
 
+    #[error("{user} converts {value} of type {from} to {to}, which is the wrong direction")]
+    #[diagnostic(code(sir::verify::bad_conversion))]
+    BadConversion {
+        user: Use,
+        value: Value,
+        from: Type,
+        to: Type,
+    },
+
     #[error("{0} returns the wrong number of values for the signature")]
     #[diagnostic(code(sir::verify::return_arity))]
     ReturnArity(Block),
@@ -154,26 +163,42 @@ impl Verifier<'_> {
     fn check_inst(&mut self, user: Use, data: &InstData) {
         match data {
             InstData::Iconst { .. } => {}
-            InstData::Unary { arg, .. } => self.check_arg(user, *arg, Type::I64),
-            InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
-                for &arg in args {
-                    self.check_arg(user, arg, Type::I64);
+            InstData::Unary { arg, .. } => self.check_same_type(user, *arg, *arg),
+            InstData::Convert { op, ty, arg } => {
+                if self.func.contains_value(*arg) {
+                    let from = self.func.value_type(*arg);
+                    if !op.accepts(from, *ty) {
+                        self.errors.push(VerifyError::BadConversion {
+                            user,
+                            value: *arg,
+                            from,
+                            to: *ty,
+                        });
+                    }
+                } else {
+                    self.errors
+                        .push(VerifyError::UnknownValue { user, value: *arg });
                 }
+            }
+            InstData::Binary { args: [a, b], .. } | InstData::Icmp { args: [a, b], .. } => {
+                self.check_same_type(user, *a, *b);
             }
             InstData::Select {
                 args: [cond, then_value, else_value],
             } => {
                 self.check_arg(user, *cond, Type::I8);
-                if self.func.contains_value(*then_value) {
-                    let ty = self.func.value_type(*then_value);
-                    self.check_arg(user, *else_value, ty);
-                } else {
-                    self.errors.push(VerifyError::UnknownValue {
-                        user,
-                        value: *then_value,
-                    });
-                }
+                self.check_same_type(user, *then_value, *else_value);
             }
+        }
+    }
+
+    fn check_same_type(&mut self, user: Use, first: Value, second: Value) {
+        if self.func.contains_value(first) {
+            let ty = self.func.value_type(first);
+            self.check_arg(user, second, ty);
+        } else {
+            self.errors
+                .push(VerifyError::UnknownValue { user, value: first });
         }
     }
 
