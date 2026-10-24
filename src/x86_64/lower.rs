@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use super::error::CompileError;
-use super::vcode::{Inst, Label, PReg, Reg, VBlock, VCode, VReg};
-use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, Terminator, Value};
+use super::vcode::{AluOp, Inst, Label, PReg, Reg, ShiftOp, UnaryOp, VBlock, VCode, VReg};
+use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, Terminator, UnOp, Value};
 
 fn vreg(value: Value) -> Reg {
     Reg::V(VReg::from_index(value.index()))
@@ -115,18 +115,21 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                     dst: result,
                     imm: *value,
                 }),
-                InstData::Binary {
-                    op: BinOp::Iadd,
-                    args: [a, b],
-                } => {
+                InstData::Unary { op, arg } => {
                     insts.push(Inst::Mov {
                         dst: result,
-                        src: vreg(*a),
+                        src: vreg(*arg),
                     });
-                    insts.push(Inst::Add {
+                    insts.push(Inst::Unary {
+                        op: match op {
+                            UnOp::Ineg => UnaryOp::Neg,
+                            UnOp::Bnot => UnaryOp::Not,
+                        },
                         dst: result,
-                        src: vreg(*b),
                     });
+                }
+                InstData::Binary { op, args: [a, b] } => {
+                    lower_binary(&mut insts, *op, result, vreg(*a), vreg(*b));
                 }
             }
         }
@@ -199,4 +202,65 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         name: func.name().to_owned(),
         blocks,
     })
+}
+
+fn lower_binary(insts: &mut Vec<Inst<Reg>>, op: BinOp, result: Reg, a: Reg, b: Reg) {
+    let alu = |insts: &mut Vec<Inst<Reg>>, op| {
+        insts.push(Inst::Mov {
+            dst: result,
+            src: a,
+        });
+        insts.push(Inst::Alu {
+            op,
+            dst: result,
+            src: b,
+        });
+    };
+    let shift = |insts: &mut Vec<Inst<Reg>>, op| {
+        let count = Reg::P(PReg::Rcx);
+        insts.push(Inst::Mov {
+            dst: result,
+            src: a,
+        });
+        insts.push(Inst::Mov { dst: count, src: b });
+        insts.push(Inst::Shift {
+            op,
+            dst: result,
+            count,
+        });
+    };
+    let divide = |insts: &mut Vec<Inst<Reg>>, signed: bool, quotient: bool| {
+        let (lo, hi) = (Reg::P(PReg::Rax), Reg::P(PReg::Rdx));
+        insts.push(Inst::Mov { dst: lo, src: a });
+        if signed {
+            insts.push(Inst::Cqo { hi, lo });
+        } else {
+            insts.push(Inst::MovImm { dst: hi, imm: 0 });
+        }
+        insts.push(Inst::Div {
+            signed,
+            divisor: b,
+            lo,
+            hi,
+        });
+        insts.push(Inst::Mov {
+            dst: result,
+            src: if quotient { lo } else { hi },
+        });
+    };
+    match op {
+        BinOp::Iadd => alu(insts, AluOp::Add),
+        BinOp::Isub => alu(insts, AluOp::Sub),
+        BinOp::Imul => alu(insts, AluOp::Imul),
+        BinOp::Band => alu(insts, AluOp::And),
+        BinOp::Bor => alu(insts, AluOp::Or),
+        BinOp::Bxor => alu(insts, AluOp::Xor),
+        BinOp::Ishl => shift(insts, ShiftOp::Shl),
+        BinOp::Ushr => shift(insts, ShiftOp::Shr),
+        BinOp::Sshr => shift(insts, ShiftOp::Sar),
+        BinOp::Sdiv => divide(insts, true, true),
+        BinOp::Udiv => divide(insts, false, true),
+        BinOp::Srem => divide(insts, true, false),
+        BinOp::Urem => divide(insts, false, false),
+    }
 }

@@ -1,41 +1,103 @@
 use super::{Block, Type, Value};
 
+/// shift amounts are taken modulo 64. `sdiv`, `udiv`, `srem` and `urem` trap on a zero divisor,
+/// and the signed forms also trap on `i64::MIN` by `-1`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinOp {
     Iadd,
+    Isub,
+    Imul,
+    Band,
+    Bor,
+    Bxor,
+    Ishl,
+    Ushr,
+    Sshr,
+    Sdiv,
+    Udiv,
+    Srem,
+    Urem,
 }
 
 impl BinOp {
+    const ALL: [BinOp; 13] = [
+        BinOp::Iadd,
+        BinOp::Isub,
+        BinOp::Imul,
+        BinOp::Band,
+        BinOp::Bor,
+        BinOp::Bxor,
+        BinOp::Ishl,
+        BinOp::Ushr,
+        BinOp::Sshr,
+        BinOp::Sdiv,
+        BinOp::Udiv,
+        BinOp::Srem,
+        BinOp::Urem,
+    ];
+
     pub fn mnemonic(self) -> &'static str {
         match self {
             BinOp::Iadd => "iadd",
+            BinOp::Isub => "isub",
+            BinOp::Imul => "imul",
+            BinOp::Band => "band",
+            BinOp::Bor => "bor",
+            BinOp::Bxor => "bxor",
+            BinOp::Ishl => "ishl",
+            BinOp::Ushr => "ushr",
+            BinOp::Sshr => "sshr",
+            BinOp::Sdiv => "sdiv",
+            BinOp::Udiv => "udiv",
+            BinOp::Srem => "srem",
+            BinOp::Urem => "urem",
         }
     }
 
     pub fn from_mnemonic(text: &str) -> Option<Self> {
-        match text {
-            "iadd" => Some(BinOp::Iadd),
-            _ => None,
+        Self::ALL.into_iter().find(|op| op.mnemonic() == text)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnOp {
+    Ineg,
+    Bnot,
+}
+
+impl UnOp {
+    const ALL: [UnOp; 2] = [UnOp::Ineg, UnOp::Bnot];
+
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            UnOp::Ineg => "ineg",
+            UnOp::Bnot => "bnot",
         }
+    }
+
+    pub fn from_mnemonic(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|op| op.mnemonic() == text)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstData {
     Iconst { value: i64 },
+    Unary { op: UnOp, arg: Value },
     Binary { op: BinOp, args: [Value; 2] },
 }
 
 impl InstData {
     pub fn result_type(&self) -> Type {
         match self {
-            InstData::Iconst { .. } | InstData::Binary { .. } => Type::I64,
+            InstData::Iconst { .. } | InstData::Unary { .. } | InstData::Binary { .. } => Type::I64,
         }
     }
 
     pub fn args(&self) -> &[Value] {
         match self {
             InstData::Iconst { .. } => &[],
+            InstData::Unary { arg, .. } => std::slice::from_ref(arg),
             InstData::Binary { args, .. } => args,
         }
     }

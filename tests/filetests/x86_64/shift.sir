@@ -1,0 +1,11 @@
+; test x86_64
+; check: shl:
+; nextln:     mov rax, rdi
+; nextln:     mov rcx, rsi
+; nextln:     shl rax, cl
+; nextln:     ret
+function %shl(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = ishl v0, v1
+    return v2
+}

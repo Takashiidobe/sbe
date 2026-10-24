@@ -4,7 +4,7 @@ use wasm_encoder::{
 };
 
 use super::error::CompileError;
-use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, Terminator, Value, verify};
+use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, Terminator, UnOp, Value, verify};
 
 pub struct Compiled {
     pub code: Vec<u8>,
@@ -35,18 +35,58 @@ impl Emitter<'_> {
         self.op(Instruction::LocalGet(self.local_of[value.index()]));
     }
 
+    // wasm's `i64.rem_s` yields 0 for `i64::MIN % -1`, but the ir (like x86 `idiv`) traps
+    fn trap_on_signed_overflow(&mut self, a: Value, b: Value) {
+        self.get(b);
+        self.op(Instruction::I64Const(-1));
+        self.op(Instruction::I64Eq);
+        self.get(a);
+        self.op(Instruction::I64Const(i64::MIN));
+        self.op(Instruction::I64Eq);
+        self.op(Instruction::I32And);
+        self.op(Instruction::If(BlockType::Empty));
+        self.op(Instruction::Unreachable);
+        self.op(Instruction::End);
+    }
+
     fn emit_insts(&mut self, block: Block) {
         for &inst in self.func.block(block).insts() {
             let result = self.local_of[self.func.inst_result(inst).index()];
             match self.func.inst(inst) {
                 InstData::Iconst { value } => self.op(Instruction::I64Const(*value)),
-                InstData::Binary {
-                    op: BinOp::Iadd,
-                    args: [a, b],
-                } => {
+                InstData::Unary { op, arg } => match op {
+                    UnOp::Ineg => {
+                        self.op(Instruction::I64Const(0));
+                        self.get(*arg);
+                        self.op(Instruction::I64Sub);
+                    }
+                    UnOp::Bnot => {
+                        self.get(*arg);
+                        self.op(Instruction::I64Const(-1));
+                        self.op(Instruction::I64Xor);
+                    }
+                },
+                InstData::Binary { op, args: [a, b] } => {
+                    if *op == BinOp::Srem {
+                        self.trap_on_signed_overflow(*a, *b);
+                    }
                     self.get(*a);
                     self.get(*b);
-                    self.op(Instruction::I64Add);
+                    self.op(match op {
+                        BinOp::Iadd => Instruction::I64Add,
+                        BinOp::Isub => Instruction::I64Sub,
+                        BinOp::Imul => Instruction::I64Mul,
+                        BinOp::Band => Instruction::I64And,
+                        BinOp::Bor => Instruction::I64Or,
+                        BinOp::Bxor => Instruction::I64Xor,
+                        BinOp::Ishl => Instruction::I64Shl,
+                        BinOp::Ushr => Instruction::I64ShrU,
+                        BinOp::Sshr => Instruction::I64ShrS,
+                        BinOp::Sdiv => Instruction::I64DivS,
+                        BinOp::Udiv => Instruction::I64DivU,
+                        BinOp::Srem => Instruction::I64RemS,
+                        BinOp::Urem => Instruction::I64RemU,
+                    });
                 }
             }
             self.op(Instruction::LocalSet(result));

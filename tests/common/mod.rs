@@ -35,3 +35,50 @@ pub fn irreducible(entry: i64, n: i64) -> i64 {
         in_one = !in_one;
     }
 }
+
+pub const BINOPS: [&str; 13] = [
+    "iadd", "isub", "imul", "band", "bor", "bxor", "ishl", "ushr", "sshr", "sdiv", "udiv", "srem",
+    "urem",
+];
+
+pub const UNOPS: [&str; 2] = ["ineg", "bnot"];
+
+pub const SAMPLES: [i64; 12] = [0, 1, -1, 2, 7, -7, 63, 64, 65, -64, i64::MIN, i64::MAX];
+
+/// `None` where the op traps
+pub fn binop_reference(op: &str, a: i64, b: i64) -> Option<i64> {
+    Some(match op {
+        "iadd" => a.wrapping_add(b),
+        "isub" => a.wrapping_sub(b),
+        "imul" => a.wrapping_mul(b),
+        "band" => a & b,
+        "bor" => a | b,
+        "bxor" => a ^ b,
+        "ishl" => a.wrapping_shl(b as u32),
+        "ushr" => (a as u64).wrapping_shr(b as u32) as i64,
+        "sshr" => a.wrapping_shr(b as u32),
+        "sdiv" => a.checked_div(b)?,
+        "udiv" => (a as u64).checked_div(b as u64)? as i64,
+        "srem" => a.checked_rem(b)?,
+        "urem" => (a as u64).checked_rem(b as u64)? as i64,
+        _ => panic!("unknown binop {op}"),
+    })
+}
+
+pub fn unop_reference(op: &str, a: i64) -> i64 {
+    match op {
+        "ineg" => a.wrapping_neg(),
+        "bnot" => !a,
+        _ => panic!("unknown unop {op}"),
+    }
+}
+
+pub fn binop_text(op: &str) -> String {
+    format!(
+        "function %f(i64, i64) -> i64 {{\nblock0(v0: i64, v1: i64):\n    v2 = {op} v0, v1\n    return v2\n}}\n"
+    )
+}
+
+pub fn unop_text(op: &str) -> String {
+    format!("function %f(i64) -> i64 {{\nblock0(v0: i64):\n    v1 = {op} v0\n    return v1\n}}\n")
+}

@@ -1,0 +1,38 @@
+; test print
+
+; check: function %ops(i64, i64) -> i64 {
+; nextln: block0(v0: i64, v1: i64):
+; nextln:     v2 = isub v0, v1
+; nextln:     v3 = imul v2, v1
+; nextln:     v4 = band v3, v0
+; nextln:     v5 = bor v4, v1
+; nextln:     v6 = bxor v5, v0
+; nextln:     v7 = ishl v6, v1
+; nextln:     v8 = ushr v7, v1
+; nextln:     v9 = sshr v8, v1
+; nextln:     v10 = sdiv v9, v1
+; nextln:     v11 = udiv v10, v1
+; nextln:     v12 = srem v11, v1
+; nextln:     v13 = urem v12, v1
+; nextln:     v14 = ineg v13
+; nextln:     v15 = bnot v14
+; nextln:     return v15
+; nextln: }
+function %ops(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = isub v0, v1
+    v3 = imul v2, v1
+    v4 = band v3, v0
+    v5 = bor v4, v1
+    v6 = bxor v5, v0
+    v7 = ishl v6, v1
+    v8 = ushr v7, v1
+    v9 = sshr v8, v1
+    v10 = sdiv v9, v1
+    v11 = udiv v10, v1
+    v12 = srem v11, v1
+    v13 = urem v12, v1
+    v14 = ineg v13
+    v15 = bnot v14
+    return v15
+}

@@ -179,3 +179,46 @@ fn builder_diamond() {
     assert_eq!(f(1), 10);
     assert_eq!(f(0), 20);
 }
+
+#[test]
+fn binary_ops_match_reference() {
+    for op in common::BINOPS {
+        let map = compile_text(&common::binop_text(op));
+        let f: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+        for a in common::SAMPLES {
+            for b in common::SAMPLES {
+                // a trapping input would raise SIGFPE and kill the test process
+                let Some(expected) = common::binop_reference(op, a, b) else {
+                    continue;
+                };
+                assert_eq!(f(a, b), expected, "{op} {a} {b}");
+            }
+        }
+    }
+}
+
+#[test]
+fn unary_ops_match_reference() {
+    for op in common::UNOPS {
+        let map = compile_text(&common::unop_text(op));
+        let f: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+        for a in common::SAMPLES {
+            assert_eq!(f(a), common::unop_reference(op, a), "{op} {a}");
+        }
+    }
+}
+
+#[test]
+fn shift_and_divide_survive_register_pressure() {
+    let map = compile_text(
+        "function %f(i64, i64, i64, i64) -> i64 {\n\
+         block0(v0: i64, v1: i64, v2: i64, v3: i64):\n\
+         v4 = ishl v0, v3\n    v5 = sdiv v1, v2\n    v6 = iadd v4, v5\n\
+         v7 = urem v6, v3\n    v8 = iadd v7, v0\n    v9 = iadd v8, v1\n\
+         v10 = iadd v9, v2\n    return v10\n}\n",
+    );
+    let f: extern "C" fn(i64, i64, i64, i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    let (a, b, c, d) = (3i64, -100, 7, 5);
+    let expected = (((a << d) + b / c) as u64 % d as u64) as i64 + a + b + c;
+    assert_eq!(f(a, b, c, d), expected);
+}

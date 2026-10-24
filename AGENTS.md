@@ -74,6 +74,10 @@ cargo nextest r --release   # once there is code to test
   - execution tests that compile a function and run it (wasm via wasmtime, x86_64 via a linked or mmapped harness), using dev-dependencies only.
 - Test harnesses and runtime-execution crates belong in `[dev-dependencies]`, never in `[dependencies]`.
 
+### Code navigation
+
+- Always use the LSP tool (definitions, references, hover, symbols, call hierarchy) to navigate and understand Rust code, in addition to grep/read. Prefer it for finding all uses of a type or function before changing it.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
 

@@ -1,0 +1,10 @@
+; test x86_64
+; check: urem:
+; check: div rcx
+; nextln:     mov rax, rdx
+; nextln:     ret
+function %urem(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = urem v0, v1
+    return v2
+}

@@ -183,3 +183,32 @@ fn builder_diamond() {
     assert_eq!(f.call(&mut store, 1).unwrap(), 10);
     assert_eq!(f.call(&mut store, 0).unwrap(), 20);
 }
+
+#[test]
+fn binary_ops_match_reference() {
+    for op in common::BINOPS {
+        let code = compile_text(&common::binop_text(op));
+        let (mut store, f) = typed::<(i64, i64), i64>(&code, "f");
+        for a in common::SAMPLES {
+            for b in common::SAMPLES {
+                let got = f.call(&mut store, (a, b)).ok();
+                assert_eq!(got, common::binop_reference(op, a, b), "{op} {a} {b}");
+            }
+        }
+    }
+}
+
+#[test]
+fn unary_ops_match_reference() {
+    for op in common::UNOPS {
+        let code = compile_text(&common::unop_text(op));
+        let (mut store, f) = typed::<i64, i64>(&code, "f");
+        for a in common::SAMPLES {
+            assert_eq!(
+                f.call(&mut store, a).unwrap(),
+                common::unop_reference(op, a),
+                "{op} {a}"
+            );
+        }
+    }
+}

@@ -100,17 +100,111 @@ impl fmt::Display for Label {
     }
 }
 
-/// two-address instructions: `Add` reads and writes `dst`. branches end a block: a conditional
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AluOp {
+    Add,
+    Sub,
+    Imul,
+    And,
+    Or,
+    Xor,
+}
+
+impl AluOp {
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            AluOp::Add => "add",
+            AluOp::Sub => "sub",
+            AluOp::Imul => "imul",
+            AluOp::And => "and",
+            AluOp::Or => "or",
+            AluOp::Xor => "xor",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShiftOp {
+    Shl,
+    Shr,
+    Sar,
+}
+
+impl ShiftOp {
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            ShiftOp::Shl => "shl",
+            ShiftOp::Shr => "shr",
+            ShiftOp::Sar => "sar",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnaryOp {
+    Neg,
+    Not,
+}
+
+impl UnaryOp {
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            UnaryOp::Neg => "neg",
+            UnaryOp::Not => "not",
+        }
+    }
+}
+
+/// two-address instructions: `Alu` reads and writes `dst`. `Shift` takes its count in `cl`, so
+/// `count` is `rcx` by the time of emission. `Cqo` and `Div` work on the `hi:lo` pair, which is
+/// `rdx:rax`; the quotient lands in `lo` and the remainder in `hi`. branches end a block: a conditional
 /// `Jnz` is always followed by a `Jmp`, so blocks never fall through implicitly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Inst<R> {
-    MovImm { dst: R, imm: i64 },
-    Mov { dst: R, src: R },
-    Add { dst: R, src: R },
-    Test { reg: R },
-    Jnz { target: Label },
-    Jmp { target: Label },
-    Ret { has_value: bool },
+    MovImm {
+        dst: R,
+        imm: i64,
+    },
+    Mov {
+        dst: R,
+        src: R,
+    },
+    Alu {
+        op: AluOp,
+        dst: R,
+        src: R,
+    },
+    Shift {
+        op: ShiftOp,
+        dst: R,
+        count: R,
+    },
+    Unary {
+        op: UnaryOp,
+        dst: R,
+    },
+    Cqo {
+        hi: R,
+        lo: R,
+    },
+    Div {
+        signed: bool,
+        divisor: R,
+        lo: R,
+        hi: R,
+    },
+    Test {
+        reg: R,
+    },
+    Jnz {
+        target: Label,
+    },
+    Jmp {
+        target: Label,
+    },
+    Ret {
+        has_value: bool,
+    },
 }
 
 impl<R: Copy> Inst<R> {
@@ -118,14 +212,26 @@ impl<R: Copy> Inst<R> {
         match *self {
             Inst::MovImm { .. } | Inst::Jnz { .. } | Inst::Jmp { .. } | Inst::Ret { .. } => vec![],
             Inst::Mov { src, .. } => vec![src],
-            Inst::Add { dst, src } => vec![dst, src],
+            Inst::Alu { dst, src, .. } => vec![dst, src],
+            Inst::Shift { dst, count, .. } => vec![dst, count],
+            Inst::Unary { dst, .. } => vec![dst],
+            Inst::Cqo { lo, .. } => vec![lo],
+            Inst::Div {
+                divisor, lo, hi, ..
+            } => vec![divisor, lo, hi],
             Inst::Test { reg } => vec![reg],
         }
     }
 
     pub fn defs(&self) -> Vec<R> {
         match *self {
-            Inst::MovImm { dst, .. } | Inst::Mov { dst, .. } | Inst::Add { dst, .. } => vec![dst],
+            Inst::MovImm { dst, .. }
+            | Inst::Mov { dst, .. }
+            | Inst::Alu { dst, .. }
+            | Inst::Shift { dst, .. }
+            | Inst::Unary { dst, .. } => vec![dst],
+            Inst::Cqo { hi, .. } => vec![hi],
+            Inst::Div { lo, hi, .. } => vec![lo, hi],
             Inst::Test { .. } | Inst::Jnz { .. } | Inst::Jmp { .. } | Inst::Ret { .. } => vec![],
         }
     }
@@ -144,9 +250,31 @@ impl<R: Copy> Inst<R> {
                 dst: f(dst),
                 src: f(src),
             },
-            Inst::Add { dst, src } => Inst::Add {
+            Inst::Alu { op, dst, src } => Inst::Alu {
+                op,
                 dst: f(dst),
                 src: f(src),
+            },
+            Inst::Shift { op, dst, count } => Inst::Shift {
+                op,
+                dst: f(dst),
+                count: f(count),
+            },
+            Inst::Unary { op, dst } => Inst::Unary { op, dst: f(dst) },
+            Inst::Cqo { hi, lo } => Inst::Cqo {
+                hi: f(hi),
+                lo: f(lo),
+            },
+            Inst::Div {
+                signed,
+                divisor,
+                lo,
+                hi,
+            } => Inst::Div {
+                signed,
+                divisor: f(divisor),
+                lo: f(lo),
+                hi: f(hi),
             },
             Inst::Test { reg } => Inst::Test { reg: f(reg) },
             Inst::Jnz { target } => Inst::Jnz { target },
@@ -161,7 +289,13 @@ impl<R: fmt::Display> fmt::Display for Inst<R> {
         match self {
             Inst::MovImm { dst, imm } => write!(f, "mov {dst}, {imm}"),
             Inst::Mov { dst, src } => write!(f, "mov {dst}, {src}"),
-            Inst::Add { dst, src } => write!(f, "add {dst}, {src}"),
+            Inst::Alu { op, dst, src } => write!(f, "{} {dst}, {src}", op.mnemonic()),
+            Inst::Shift { op, dst, .. } => write!(f, "{} {dst}, cl", op.mnemonic()),
+            Inst::Unary { op, dst } => write!(f, "{} {dst}", op.mnemonic()),
+            Inst::Cqo { .. } => f.write_str("cqo"),
+            Inst::Div {
+                signed, divisor, ..
+            } => write!(f, "{} {divisor}", if *signed { "idiv" } else { "div" }),
             Inst::Test { reg } => write!(f, "test {reg}, {reg}"),
             Inst::Jnz { target } => write!(f, "jnz {target}"),
             Inst::Jmp { target } => write!(f, "jmp {target}"),

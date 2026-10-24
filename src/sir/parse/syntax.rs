@@ -1,7 +1,7 @@
 use super::ast::{BlockAst, FunctionAst, InstAst, Name, Op, Param, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
 use super::lexer::{Token, TokenKind};
-use crate::sir::{BinOp, Type};
+use crate::sir::{BinOp, Type, UnOp};
 
 pub(super) struct Parser<'a> {
     src: &'a str,
@@ -153,16 +153,19 @@ impl<'a> Parser<'a> {
                 Op::Iconst(value)
             }
             other => {
-                let Some(op) = BinOp::from_mnemonic(other) else {
+                if let Some(op) = UnOp::from_mnemonic(other) {
+                    Op::Unary(op, self.name()?)
+                } else if let Some(op) = BinOp::from_mnemonic(other) {
+                    let a = self.name()?;
+                    self.expect(TokenKind::Comma)?;
+                    let b = self.name()?;
+                    Op::Binary(op, a, b)
+                } else {
                     return Err(Failure {
                         kind: ParseErrorKind::UnknownOp(other.to_owned()),
                         span: op_tok.span(),
                     });
-                };
-                let a = self.name()?;
-                self.expect(TokenKind::Comma)?;
-                let b = self.name()?;
-                Op::Binary(op, a, b)
+                }
             }
         };
         Ok(InstAst { result, op })

@@ -1,10 +1,12 @@
 use std::collections::BTreeSet;
 
-use iced_x86::code_asm::{AsmRegister64, CodeAssembler, r8, r9, r10, r11, rax, rcx, rdi, rdx, rsi};
+use iced_x86::code_asm::{
+    AsmRegister64, CodeAssembler, cl, r8, r9, r10, r11, rax, rcx, rdi, rdx, rsi,
+};
 use iced_x86::{Formatter, IntelFormatter};
 
 use super::error::CompileError;
-use super::vcode::{Inst, PReg, VCode};
+use super::vcode::{AluOp, Inst, PReg, ShiftOp, UnaryOp, VCode};
 
 pub struct Compiled {
     pub name: String,
@@ -59,7 +61,40 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
             match *inst {
                 Inst::MovImm { dst, imm } => a.mov(asm_reg(dst), imm),
                 Inst::Mov { dst, src } => a.mov(asm_reg(dst), asm_reg(src)),
-                Inst::Add { dst, src } => a.add(asm_reg(dst), asm_reg(src)),
+                Inst::Alu { op, dst, src } => {
+                    let (dst, src) = (asm_reg(dst), asm_reg(src));
+                    match op {
+                        AluOp::Add => a.add(dst, src),
+                        AluOp::Sub => a.sub(dst, src),
+                        AluOp::Imul => a.imul_2(dst, src),
+                        AluOp::And => a.and(dst, src),
+                        AluOp::Or => a.or(dst, src),
+                        AluOp::Xor => a.xor(dst, src),
+                    }
+                }
+                Inst::Shift { op, dst, count } => {
+                    debug_assert_eq!(count, PReg::Rcx);
+                    let dst = asm_reg(dst);
+                    match op {
+                        ShiftOp::Shl => a.shl(dst, cl),
+                        ShiftOp::Shr => a.shr(dst, cl),
+                        ShiftOp::Sar => a.sar(dst, cl),
+                    }
+                }
+                Inst::Unary { op, dst } => match op {
+                    UnaryOp::Neg => a.neg(asm_reg(dst)),
+                    UnaryOp::Not => a.not(asm_reg(dst)),
+                },
+                Inst::Cqo { .. } => a.cqo(),
+                Inst::Div {
+                    signed, divisor, ..
+                } => {
+                    if signed {
+                        a.idiv(asm_reg(divisor))
+                    } else {
+                        a.div(asm_reg(divisor))
+                    }
+                }
                 Inst::Test { reg } => a.test(asm_reg(reg), asm_reg(reg)),
                 Inst::Jnz { target } => a.jne(labels[resolved[target.0]]),
                 Inst::Jmp { target } => a.jmp(labels[resolved[target.0]]),

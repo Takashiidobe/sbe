@@ -1,0 +1,12 @@
+; test x86_64
+; check: sdiv:
+; nextln:     mov rax, rdi
+; nextln:     mov rcx, rsi
+; nextln:     cqo
+; nextln:     idiv rcx
+; nextln:     ret
+function %sdiv(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = sdiv v0, v1
+    return v2
+}
