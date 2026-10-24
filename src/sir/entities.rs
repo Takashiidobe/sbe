@@ -1,5 +1,7 @@
+use std::fmt;
+
 macro_rules! entity {
-    ($name:ident) => {
+    ($name:ident, $prefix:literal) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub struct $name(u32);
 
@@ -12,9 +14,15 @@ macro_rules! entity {
                 self.0 as usize
             }
         }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, concat!($prefix, "{}"), self.0)
+            }
+        }
     };
 }
 
-entity!(Value);
-entity!(Block);
-entity!(Inst);
+entity!(Value, "v");
+entity!(Block, "block");
+entity!(Inst, "inst");

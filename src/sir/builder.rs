@@ -1,0 +1,134 @@
+use miette::Diagnostic;
+use thiserror::Error;
+
+use super::{
+    Block, Function, InstData, Signature, Terminator, Type, Value, VerifyErrors, verify::verify,
+};
+
+#[derive(Clone, Debug, PartialEq, Eq, Error, Diagnostic)]
+pub enum BuilderError {
+    #[error("no current block; call switch_to_block first")]
+    #[diagnostic(code(sir::builder::no_current_block))]
+    NoCurrentBlock,
+
+    #[error("{0} does not exist in this function")]
+    #[diagnostic(code(sir::builder::unknown_block))]
+    UnknownBlock(Block),
+
+    #[error("{0} is not defined in this function")]
+    #[diagnostic(
+        code(sir::builder::unknown_value),
+        help("values come from instruction results or block params of this builder")
+    )]
+    UnknownValue(Value),
+
+    #[error("{0} is already terminated")]
+    #[diagnostic(code(sir::builder::block_terminated))]
+    BlockTerminated(Block),
+}
+
+pub struct FunctionBuilder {
+    func: Function,
+    current: Option<Block>,
+}
+
+impl FunctionBuilder {
+    pub fn new(name: impl Into<String>, signature: Signature) -> Self {
+        Self {
+            func: Function::new(name, signature),
+            current: None,
+        }
+    }
+
+    pub fn entry_block(&self) -> Block {
+        self.func.entry_block()
+    }
+
+    pub fn create_block(&mut self) -> Block {
+        self.func.create_block()
+    }
+
+    pub fn append_block_param(&mut self, block: Block, ty: Type) -> Result<Value, BuilderError> {
+        self.check_block(block)?;
+        Ok(self.func.append_block_param(block, ty))
+    }
+
+    pub fn block_params(&self, block: Block) -> Result<&[Value], BuilderError> {
+        self.check_block(block)?;
+        Ok(self.func.block(block).params())
+    }
+
+    pub fn switch_to_block(&mut self, block: Block) -> Result<(), BuilderError> {
+        self.check_block(block)?;
+        self.current = Some(block);
+        Ok(())
+    }
+
+    pub fn iconst(&mut self, value: i64) -> Result<Value, BuilderError> {
+        self.emit(InstData::Iconst { value })
+    }
+
+    pub fn iadd(&mut self, a: Value, b: Value) -> Result<Value, BuilderError> {
+        self.check_value(a)?;
+        self.check_value(b)?;
+        self.emit(InstData::Iadd { args: [a, b] })
+    }
+
+    pub fn ret(&mut self, value: Value) -> Result<(), BuilderError> {
+        self.ret_values(&[value])
+    }
+
+    pub fn ret_values(&mut self, values: &[Value]) -> Result<(), BuilderError> {
+        values.iter().try_for_each(|&v| self.check_value(v))?;
+        self.terminate(Terminator::Return {
+            values: values.to_vec(),
+        })
+    }
+
+    pub fn jump(&mut self, dest: Block, args: &[Value]) -> Result<(), BuilderError> {
+        self.check_block(dest)?;
+        args.iter().try_for_each(|&v| self.check_value(v))?;
+        self.terminate(Terminator::Jump {
+            dest,
+            args: args.to_vec(),
+        })
+    }
+
+    pub fn finish(self) -> Result<Function, VerifyErrors> {
+        verify(&self.func)?;
+        Ok(self.func)
+    }
+
+    fn emit(&mut self, data: InstData) -> Result<Value, BuilderError> {
+        let block = self.open_block()?;
+        Ok(self.func.push_inst(block, data))
+    }
+
+    fn terminate(&mut self, terminator: Terminator) -> Result<(), BuilderError> {
+        let block = self.open_block()?;
+        self.func.set_terminator(block, terminator);
+        Ok(())
+    }
+
+    fn open_block(&self) -> Result<Block, BuilderError> {
+        let block = self.current.ok_or(BuilderError::NoCurrentBlock)?;
+        if self.func.block(block).terminator().is_some() {
+            return Err(BuilderError::BlockTerminated(block));
+        }
+        Ok(block)
+    }
+
+    fn check_block(&self, block: Block) -> Result<(), BuilderError> {
+        self.func
+            .contains_block(block)
+            .then_some(())
+            .ok_or(BuilderError::UnknownBlock(block))
+    }
+
+    fn check_value(&self, value: Value) -> Result<(), BuilderError> {
+        self.func
+            .contains_value(value)
+            .then_some(())
+            .ok_or(BuilderError::UnknownValue(value))
+    }
+}

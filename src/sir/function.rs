@@ -135,6 +135,14 @@ impl Function {
         self.values.len()
     }
 
+    pub fn num_insts(&self) -> usize {
+        self.insts.len()
+    }
+
+    pub fn contains_block(&self, block: Block) -> bool {
+        block.index() < self.blocks.len()
+    }
+
     pub fn contains_value(&self, value: Value) -> bool {
         value.index() < self.values.len()
     }
