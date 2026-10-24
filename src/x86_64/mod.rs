@@ -1,6 +1,7 @@
 mod emit;
 mod error;
 mod lower;
+mod object;
 mod regalloc;
 mod vcode;
 

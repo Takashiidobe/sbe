@@ -28,4 +28,8 @@ pub enum CompileError {
     #[error("failed to assemble: {0}")]
     #[diagnostic(code(x86_64::assemble))]
     Assemble(String),
+
+    #[error("failed to write object file: {0}")]
+    #[diagnostic(code(x86_64::object))]
+    Object(String),
 }

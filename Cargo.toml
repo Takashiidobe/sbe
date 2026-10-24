@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 iced-x86 = { version = "1.21.0", features = ["code_asm"] }
 miette = "7.6.0"
+object = { version = "0.40.0", features = ["write_core", "elf"] }
 thiserror = "2.0.21"
 wasm-encoder = "0.262.0"
 wasmprinter = "0.262.0"
@@ -14,6 +15,8 @@ wasmprinter = "0.262.0"
 filecheck = "0.5.0"
 libtest-mimic = "0.8.2"
 memmap2 = "0.9.12"
+object = { version = "0.40.0", features = ["read"] }
+tempfile = "3.27.0"
 wasmi = "2.0.0"
 wasmparser = "0.262.0"
 

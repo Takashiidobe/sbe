@@ -5,6 +5,7 @@ use super::error::CompileError;
 use super::vcode::{Inst, PReg, VCode};
 
 pub struct Compiled {
+    pub name: String,
     pub code: Vec<u8>,
     pub asm: String,
 }
@@ -55,5 +56,9 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
         asm.push('\n');
     }
 
-    Ok(Compiled { code: bytes, asm })
+    Ok(Compiled {
+        name: code.name.clone(),
+        code: bytes,
+        asm,
+    })
 }
