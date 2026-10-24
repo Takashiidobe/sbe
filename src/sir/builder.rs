@@ -2,8 +2,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    BinOp, Block, CvtOp, FuncRef, Function, InstData, IntCC, Signature, StackSlot, SwitchCase,
-    Terminator, Type, UnOp, Value, VerifyErrors, verify::verify,
+    BinOp, Block, CvtOp, FloatCC, FloatOp, FuncRef, Function, InstData, IntCC, Signature,
+    StackSlot, SwitchCase, Terminator, Type, UnOp, Value, VerifyErrors, verify::verify,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Diagnostic)]
@@ -92,6 +92,27 @@ impl FunctionBuilder {
     pub fn convert(&mut self, op: CvtOp, ty: Type, arg: Value) -> Result<Value, BuilderError> {
         self.check_value(arg)?;
         self.emit(InstData::Convert { op, ty, arg })
+    }
+
+    /// `value` is rounded to `ty`
+    pub fn fconst(&mut self, ty: Type, value: f64) -> Result<Value, BuilderError> {
+        let bits = match ty {
+            Type::F32 => u64::from((value as f32).to_bits()),
+            _ => value.to_bits(),
+        };
+        self.emit(InstData::Fconst { ty, bits })
+    }
+
+    pub fn fbinary(&mut self, op: FloatOp, a: Value, b: Value) -> Result<Value, BuilderError> {
+        self.check_value(a)?;
+        self.check_value(b)?;
+        self.emit(InstData::Fbinary { op, args: [a, b] })
+    }
+
+    pub fn fcmp(&mut self, cc: FloatCC, a: Value, b: Value) -> Result<Value, BuilderError> {
+        self.check_value(a)?;
+        self.check_value(b)?;
+        self.emit(InstData::Fcmp { cc, args: [a, b] })
     }
 
     pub fn unary(&mut self, op: UnOp, arg: Value) -> Result<Value, BuilderError> {

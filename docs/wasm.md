@@ -19,6 +19,12 @@ return. Addresses are `i64` in sir and wrapped to `i32` for the access, so only
 the low 4 GiB can be named; `stack_addr` zero-extends. Accesses are unaligned
 and nothing is bounds-checked beyond wasm's own trap.
 
+## Floats
+
+`f32` and `f64` are native wasm locals. `fcmp` maps to `f64.eq` and friends,
+`fcvt_to_sint` to the saturating `trunc_sat` forms (so it never traps), and
+`bitcast` to `reinterpret`.
+
 ## Control flow
 
 `switch` is a chain of `if`/`else` comparisons, not a `br_table`, so each edge

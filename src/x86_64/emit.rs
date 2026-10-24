@@ -1,17 +1,17 @@
 use std::collections::BTreeSet;
 
-use iced_x86::BlockEncoderOptions;
 use iced_x86::code_asm::{
-    AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, CodeAssembler, al, ax, bl, bx,
-    byte_ptr, cl, cx, di, dil, dl, dword_ptr, dx, eax, ebx, ecx, edi, edx, esi, ptr, qword_ptr, r8,
-    r8b, r8d, r8w, r9, r9b, r9d, r9w, r10, r10b, r10d, r10w, r11, r11b, r11d, r11w, r12, r12b,
-    r12d, r12w, r13, r13b, r13d, r13w, r14, r14b, r14d, r14w, r15, r15b, r15d, r15w, rax, rbx, rcx,
-    rdi, rdx, rsi, rsp, si, sil, word_ptr,
+    AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, AsmRegisterXmm, CodeAssembler, al,
+    ax, bl, bx, byte_ptr, cl, cx, di, dil, dl, dword_ptr, dx, eax, ebx, ecx, edi, edx, esi, ptr,
+    qword_ptr, r8, r8b, r8d, r8w, r9, r9b, r9d, r9w, r10, r10b, r10d, r10w, r11, r11b, r11d, r11w,
+    r12, r12b, r12d, r12w, r13, r13b, r13d, r13w, r14, r14b, r14d, r14w, r15, r15b, r15d, r15w,
+    rax, rbx, rcx, rdi, rdx, rsi, rsp, si, sil, word_ptr,
 };
+use iced_x86::{BlockEncoderOptions, IcedError};
 use iced_x86::{Formatter, IntelFormatter};
 
 use super::error::CompileError;
-use super::vcode::{AluOp, Cc, Inst, PReg, ShiftOp, UnaryOp, VCode};
+use super::vcode::{AluOp, Cc, FpConvert, FpOp, Inst, PReg, ShiftOp, UnaryOp, VCode};
 
 /// a 32-bit pc-relative field at `offset` that the linker points at `symbol`
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,6 +106,102 @@ fn asm_reg32(reg: PReg) -> AsmRegister32 {
     }
 }
 
+fn asm_xmm(index: u8) -> AsmRegisterXmm {
+    use iced_x86::code_asm::{xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7};
+    [xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7][usize::from(index)]
+}
+
+fn to_xmm(a: &mut CodeAssembler, xmm: u8, double: bool, src: PReg) -> Result<(), IcedError> {
+    if double {
+        a.movq(asm_xmm(xmm), asm_reg(src))
+    } else {
+        a.movd(asm_xmm(xmm), asm_reg32(src))
+    }
+}
+
+fn from_xmm(a: &mut CodeAssembler, xmm: u8, double: bool, dst: PReg) -> Result<(), IcedError> {
+    if double {
+        a.movq(asm_reg(dst), asm_xmm(xmm))
+    } else {
+        a.movd(asm_reg32(dst), asm_xmm(xmm))
+    }
+}
+
+fn emit_float(a: &mut CodeAssembler, inst: &Inst<PReg>) -> Result<(), IcedError> {
+    let (x0, x1) = (asm_xmm(0), asm_xmm(1));
+    match *inst {
+        Inst::FBin {
+            op,
+            double,
+            dst,
+            a: lhs,
+            b: rhs,
+        } => {
+            to_xmm(a, 0, double, lhs)?;
+            to_xmm(a, 1, double, rhs)?;
+            match (op, double) {
+                (FpOp::Add, true) => a.addsd(x0, x1)?,
+                (FpOp::Sub, true) => a.subsd(x0, x1)?,
+                (FpOp::Mul, true) => a.mulsd(x0, x1)?,
+                (FpOp::Div, true) => a.divsd(x0, x1)?,
+                (FpOp::Add, false) => a.addss(x0, x1)?,
+                (FpOp::Sub, false) => a.subss(x0, x1)?,
+                (FpOp::Mul, false) => a.mulss(x0, x1)?,
+                (FpOp::Div, false) => a.divss(x0, x1)?,
+            }
+            from_xmm(a, 0, double, dst)
+        }
+        Inst::FCmp {
+            pred,
+            double,
+            dst,
+            a: lhs,
+            b: rhs,
+        } => {
+            to_xmm(a, 0, double, lhs)?;
+            to_xmm(a, 1, double, rhs)?;
+            if double {
+                a.cmpsd_3(x0, x1, pred.imm())?;
+            } else {
+                a.cmpss(x0, x1, pred.imm())?;
+            }
+            from_xmm(a, 0, double, dst)?;
+            a.and(asm_reg(dst), 1)
+        }
+        Inst::FCvt { kind, dst, src } => match kind {
+            FpConvert::FromInt { double } => {
+                if double {
+                    a.cvtsi2sd(x0, asm_reg(src))?;
+                } else {
+                    a.cvtsi2ss(x0, asm_reg(src))?;
+                }
+                from_xmm(a, 0, double, dst)
+            }
+            FpConvert::ToInt { double } => {
+                to_xmm(a, 0, double, src)?;
+                if double {
+                    a.cvttsd2si(asm_reg(dst), x0)
+                } else {
+                    a.cvttss2si(asm_reg(dst), x0)
+                }
+            }
+            FpConvert::Promote => {
+                to_xmm(a, 0, false, src)?;
+                a.cvtss2sd(x0, x0)?;
+                from_xmm(a, 0, true, dst)
+            }
+            FpConvert::Demote => {
+                to_xmm(a, 0, true, src)?;
+                a.cvtsd2ss(x0, x0)?;
+                from_xmm(a, 0, false, dst)
+            }
+        },
+        Inst::ToXmm { xmm, double, src } => to_xmm(a, xmm, double, src),
+        Inst::FromXmm { xmm, double, dst } => from_xmm(a, xmm, double, dst),
+        _ => unreachable!("not a float instruction"),
+    }
+}
+
 fn assemble_error(err: iced_x86::IcedError) -> CompileError {
     CompileError::Assemble(err.to_string())
 }
@@ -137,6 +233,7 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
             lines.push(Line::Label(index));
         }
         for inst in block.insts.iter().filter(|i| emitted(index, i)) {
+            let before = a.instructions().len();
             match *inst {
                 Inst::MovImm { dst, imm } => a.mov(asm_reg(dst), imm),
                 Inst::Mov { dst, src } => a.mov(asm_reg(dst), asm_reg(src)),
@@ -251,6 +348,11 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
                     }
                 }
                 Inst::StackAddr { dst, offset } => a.lea(asm_reg(dst), ptr(rsp + offset)),
+                Inst::FBin { .. }
+                | Inst::FCmp { .. }
+                | Inst::FCvt { .. }
+                | Inst::ToXmm { .. }
+                | Inst::FromXmm { .. } => emit_float(&mut a, inst),
                 Inst::Push { reg } => a.push(asm_reg(reg)),
                 Inst::Pop { reg } => a.pop(asm_reg(reg)),
                 Inst::AdjustSp { bytes } if bytes >= 0 => a.sub(rsp, bytes),
@@ -262,7 +364,7 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
                 Inst::Jz { target } => Line::Branch("je", resolved[target.0]),
                 Inst::Jmp { target } => Line::Branch("jmp", resolved[target.0]),
                 Inst::Call { ref symbol, .. } => Line::Call(symbol.clone()),
-                _ => Line::Plain,
+                _ => Line::Plain(a.instructions().len() - before),
             });
         }
     }
@@ -301,10 +403,12 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
                 instructions.next();
                 asm.push_str(&format!("    call {symbol}\n"));
             }
-            Line::Plain => {
-                asm.push_str("    ");
-                formatter.format(instructions.next().expect("one per line"), &mut asm);
-                asm.push('\n');
+            Line::Plain(count) => {
+                for _ in 0..count {
+                    asm.push_str("    ");
+                    formatter.format(instructions.next().expect("counted"), &mut asm);
+                    asm.push('\n');
+                }
             }
         }
     }
@@ -321,5 +425,5 @@ enum Line {
     Label(usize),
     Call(String),
     Branch(&'static str, usize),
-    Plain,
+    Plain(usize),
 }

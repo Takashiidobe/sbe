@@ -214,3 +214,103 @@ int main(void) {
     );
     assert_eq!(stdout_of(&exe_path), expected);
 }
+
+#[test]
+fn module_floats_against_c_harness() {
+    let module = parse_module("float", include_str!("programs/float.sir")).unwrap();
+    let object = module_object(&compile_module(&module).unwrap()).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let object_path = dir.path().join("module.o");
+    let main_path = dir.path().join("main.c");
+    let exe_path = dir.path().join("prog");
+    std::fs::write(&object_path, object).unwrap();
+    std::fs::write(
+        &main_path,
+        r#"#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+double hyp(double x, long n, float y) {
+    if ((uintptr_t)__builtin_frame_address(0) % 16 != 0) abort();
+    return x + n + y * 2.0;
+}
+extern double axpy(double, double, double);
+extern float mean32(float, float);
+extern double sub_div(double, double);
+extern long cmp_all(double, double);
+extern long cmp_all32(float, float);
+extern long to_int(double);
+extern int to_int32(float);
+extern long roundtrip(long);
+extern float small_to_float(int);
+extern double widen(float);
+extern float narrow(double);
+extern long bits(double);
+extern double from_bits(long);
+extern double fsum(long);
+extern double mixed(long, double, int, float);
+extern double max_of(double, double);
+extern double via_memory(double, float);
+extern double call_hyp(double, long, float);
+static unsigned long long b(double d) { unsigned long long u; memcpy(&u, &d, 8); return u; }
+static unsigned b32(float f) { unsigned u; memcpy(&u, &f, 4); return u; }
+int main(void) {
+    double xs[] = {0.0, -0.0, 1.5, -2.25, 1e10, 1.0 / 0.0, 0.0 / 0.0};
+    for (int i = 0; i < 7; i++) {
+        for (int j = 0; j < 7; j++) {
+            printf("%ld ", cmp_all(xs[i], xs[j]));
+        }
+    }
+    printf("\n");
+    printf("%llx %llx %llx\n", b(axpy(1.5, 2.0, 0.25)), b(sub_div(7.0, 2.0)), b(max_of(3.0, -1.0)));
+    printf("%x %ld %ld\n", b32(mean32(1.0f, 4.0f)), cmp_all32(1.0f, 2.0f), cmp_all32(0.0f / 0.0f, 1.0f));
+    printf("%ld %ld %d %ld\n", to_int(-1.9), to_int(123456.789), to_int32(-7.9f), roundtrip(-(1L << 40)));
+    printf("%x %llx %x\n", b32(small_to_float(70000)), b(widen(0.1f)), b32(narrow(0.1)));
+    printf("%lx %llx\n", bits(-2.25), b(from_bits(0x7ff8000000000001L)));
+    printf("%llx %llx\n", b(fsum(100)), b(mixed(3, 0.5, -4, 1.25f)));
+    printf("%llx %llx\n", b(via_memory(1.5, 2.25f)), b(call_hyp(1.5, 2, 0.25f)));
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    run(Command::new("cc")
+        .args(["-O0", "-fno-omit-frame-pointer", "-o"])
+        .arg(&exe_path)
+        .arg(&main_path)
+        .arg(&object_path));
+
+    let nan = f64::NAN;
+    let xs = [0.0, -0.0, 1.5, -2.25, 1e10, f64::INFINITY, nan];
+    let mut cmp = String::new();
+    for a in xs {
+        for b in xs {
+            cmp += &format!("{} ", common::float_cmp_all(a, b));
+        }
+    }
+    let f32bits = |f: f32| f.to_bits();
+    let expected = format!(
+        "{cmp}\n{:x} {:x} {:x}\n{:x} {} {}\n{} {} {} {}\n{:x} {:x} {:x}\n{:x} {:x}\n{:x} {:x}\n{:x} {:x}\n",
+        (1.5f64 * 2.0 + 0.25).to_bits(),
+        ((7.0f64 - 2.0) / 2.0).to_bits(),
+        3.0f64.to_bits(),
+        f32bits(2.5),
+        common::float_cmp_all32(1.0, 2.0),
+        common::float_cmp_all32(f32::NAN, 1.0),
+        -1,
+        123456,
+        -7,
+        -(1i64 << 40),
+        f32bits(f32::from(70000u32 as u16 as i16)),
+        f64::from(0.1f32).to_bits(),
+        f32bits(0.1f64 as f32),
+        (-2.25f64).to_bits(),
+        0x7ff8000000000001u64,
+        common::float_fsum(100).to_bits(),
+        common::float_mixed(3, 0.5, -4, 1.25).to_bits(),
+        (1.5 + f64::from(2.25f32)).to_bits(),
+        (common::float_hyp(1.5, 2, 0.25) + 1.0).to_bits(),
+    );
+    assert_eq!(stdout_of(&exe_path), expected);
+}

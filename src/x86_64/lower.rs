@@ -1,11 +1,50 @@
 use std::collections::HashMap;
 
 use super::error::CompileError;
-use super::vcode::{AluOp, Cc, Inst, Label, PReg, Reg, ShiftOp, UnaryOp, VBlock, VCode, VReg};
-use crate::sir::{
-    BinOp, Block, ControlFlow, CvtOp, Function, InstData, IntCC, Terminator, Type, UnOp, Value,
-    ValueDef,
+use super::vcode::{
+    AluOp, Cc, FpConvert, FpOp, FpPred, Inst, Label, PReg, Reg, ShiftOp, UnaryOp, VBlock, VCode,
+    VReg,
 };
+use crate::sir::{
+    BinOp, Block, ControlFlow, CvtOp, FloatCC, FloatOp, Function, InstData, IntCC, Terminator,
+    Type, UnOp, Value, ValueDef,
+};
+
+const XMM_ARGS: usize = 8;
+
+/// where the system v abi passes a value: ints and floats count separately
+#[derive(Clone, Copy)]
+enum ArgLoc {
+    Int(PReg),
+    Xmm(u8),
+}
+
+fn arg_locs(types: &[Type]) -> Result<Vec<ArgLoc>, CompileError> {
+    let (mut ints, mut floats) = (0, 0);
+    types
+        .iter()
+        .map(|ty| {
+            if ty.is_float() {
+                floats += 1;
+                if floats > XMM_ARGS {
+                    return Err(CompileError::TooManyParams {
+                        found: floats,
+                        max: XMM_ARGS,
+                    });
+                }
+                Ok(ArgLoc::Xmm(floats as u8 - 1))
+            } else {
+                ints += 1;
+                PReg::ARGS.get(ints - 1).map(|&p| ArgLoc::Int(p)).ok_or(
+                    CompileError::TooManyParams {
+                        found: ints,
+                        max: PReg::ARGS.len(),
+                    },
+                )
+            }
+        })
+        .collect()
+}
 
 fn vreg(value: Value) -> Reg {
     Reg::V(VReg::from_index(value.index()))
@@ -46,7 +85,12 @@ fn condition_reg(
     cond: Value,
 ) -> Reg {
     let from_icmp = match func.value_def(cond) {
-        ValueDef::Result(inst) => matches!(func.inst(inst), InstData::Icmp { .. }),
+        ValueDef::Result(inst) => {
+            matches!(
+                func.inst(inst),
+                InstData::Icmp { .. } | InstData::Fcmp { .. }
+            )
+        }
         ValueDef::Param(..) => false,
     };
     if from_icmp {
@@ -122,12 +166,7 @@ fn parallel_moves(dsts: &[Value], srcs: &[Value], next_vreg: &mut usize) -> Vec<
 /// expects a verified function
 pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
     let signature = func.signature();
-    if signature.params.len() > PReg::ARGS.len() {
-        return Err(CompileError::TooManyParams {
-            found: signature.params.len(),
-            max: PReg::ARGS.len(),
-        });
-    }
+    let param_locs = arg_locs(&signature.params)?;
     if signature.returns.len() > 1 {
         return Err(CompileError::TooManyReturns(signature.returns.len()));
     }
@@ -149,10 +188,17 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         let mut insts = Vec::new();
 
         if block == func.entry_block() {
-            for (&param, &arg) in data.params().iter().zip(&PReg::ARGS) {
-                insts.push(Inst::Mov {
-                    dst: vreg(param),
-                    src: Reg::P(arg),
+            for (&param, &loc) in data.params().iter().zip(&param_locs) {
+                insts.push(match loc {
+                    ArgLoc::Int(arg) => Inst::Mov {
+                        dst: vreg(param),
+                        src: Reg::P(arg),
+                    },
+                    ArgLoc::Xmm(xmm) => Inst::FromXmm {
+                        xmm,
+                        double: func.value_type(param) == Type::F64,
+                        dst: vreg(param),
+                    },
                 });
             }
         }
@@ -160,7 +206,7 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         for &inst in data.insts() {
             if let InstData::Call { callee, args } = func.inst(inst) {
                 let symbol = func.callee(*callee).name.clone();
-                lower_call(&mut insts, symbol, args, func.inst_result(inst))?;
+                lower_call(&mut insts, func, symbol, args, func.inst_result(inst))?;
                 continue;
             }
             if let InstData::Store {
@@ -222,7 +268,86 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                         dst: result,
                     });
                 }
+                InstData::Fconst { ty, bits } => insts.push(Inst::MovImm {
+                    dst: result,
+                    imm: if *ty == Type::F32 {
+                        i64::from(*bits as u32)
+                    } else {
+                        *bits as i64
+                    },
+                }),
+                InstData::Fbinary { op, args: [a, b] } => insts.push(Inst::FBin {
+                    op: match op {
+                        FloatOp::Fadd => FpOp::Add,
+                        FloatOp::Fsub => FpOp::Sub,
+                        FloatOp::Fmul => FpOp::Mul,
+                        FloatOp::Fdiv => FpOp::Div,
+                    },
+                    double: func.value_type(*a) == Type::F64,
+                    dst: result,
+                    a: vreg(*a),
+                    b: vreg(*b),
+                }),
+                InstData::Fcmp { cc, args: [a, b] } => {
+                    let (pred, swap) = match cc {
+                        FloatCC::Eq => (FpPred::Eq, false),
+                        FloatCC::Ne => (FpPred::Neq, false),
+                        FloatCC::Lt => (FpPred::Lt, false),
+                        FloatCC::Le => (FpPred::Le, false),
+                        FloatCC::Gt => (FpPred::Lt, true),
+                        FloatCC::Ge => (FpPred::Le, true),
+                    };
+                    let (a, b) = if swap { (*b, *a) } else { (*a, *b) };
+                    insts.push(Inst::FCmp {
+                        pred,
+                        double: func.value_type(a) == Type::F64,
+                        dst: result,
+                        a: vreg(a),
+                        b: vreg(b),
+                    });
+                }
+                InstData::Convert {
+                    op: op @ (CvtOp::FcvtFromSint | CvtOp::FcvtToSint),
+                    ty,
+                    arg,
+                } => {
+                    let (kind, src) = if *op == CvtOp::FcvtFromSint {
+                        let src = extended(&mut insts, &mut next_vreg, func, *arg, true);
+                        (
+                            FpConvert::FromInt {
+                                double: *ty == Type::F64,
+                            },
+                            src,
+                        )
+                    } else {
+                        (
+                            FpConvert::ToInt {
+                                double: func.value_type(*arg) == Type::F64,
+                            },
+                            vreg(*arg),
+                        )
+                    };
+                    insts.push(Inst::FCvt {
+                        kind,
+                        dst: result,
+                        src,
+                    });
+                }
                 InstData::Convert { op, arg, .. } => match op {
+                    CvtOp::Fpromote | CvtOp::Fdemote => insts.push(Inst::FCvt {
+                        kind: if *op == CvtOp::Fpromote {
+                            FpConvert::Promote
+                        } else {
+                            FpConvert::Demote
+                        },
+                        dst: result,
+                        src: vreg(*arg),
+                    }),
+                    CvtOp::FcvtFromSint | CvtOp::FcvtToSint => unreachable!("matched above"),
+                    CvtOp::Bitcast => insts.push(Inst::Mov {
+                        dst: result,
+                        src: vreg(*arg),
+                    }),
                     CvtOp::Sextend | CvtOp::Uextend => insts.push(Inst::Ext {
                         signed: *op == CvtOp::Sextend,
                         bits: func.value_type(*arg).bits() as u8,
@@ -275,9 +400,18 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         match data.terminator().expect("verified function") {
             Terminator::Return { values } => {
                 if let [value] = values.as_slice() {
-                    insts.push(Inst::Mov {
-                        dst: Reg::P(PReg::RET),
-                        src: vreg(*value),
+                    let ty = func.value_type(*value);
+                    insts.push(if ty.is_float() {
+                        Inst::ToXmm {
+                            xmm: 0,
+                            double: ty == Type::F64,
+                            src: vreg(*value),
+                        }
+                    } else {
+                        Inst::Mov {
+                            dst: Reg::P(PReg::RET),
+                            src: vreg(*value),
+                        }
                     });
                 }
                 insts.push(Inst::Ret {
@@ -348,32 +482,47 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
 
 fn lower_call(
     insts: &mut Vec<Inst<Reg>>,
+    func: &Function,
     symbol: String,
     args: &[Value],
     result: Option<Value>,
 ) -> Result<(), CompileError> {
-    if args.len() > PReg::ARGS.len() {
-        return Err(CompileError::TooManyParams {
-            found: args.len(),
-            max: PReg::ARGS.len(),
-        });
+    let types: Vec<Type> = args.iter().map(|&a| func.value_type(a)).collect();
+    let mut int_args = Vec::new();
+    for (&arg, loc) in args.iter().zip(arg_locs(&types)?) {
+        match loc {
+            ArgLoc::Int(dst) => {
+                insts.push(Inst::Mov {
+                    dst: Reg::P(dst),
+                    src: vreg(arg),
+                });
+                int_args.push(Reg::P(dst));
+            }
+            ArgLoc::Xmm(xmm) => insts.push(Inst::ToXmm {
+                xmm,
+                double: func.value_type(arg) == Type::F64,
+                src: vreg(arg),
+            }),
+        }
     }
-    let arg_regs: Vec<Reg> = PReg::ARGS.iter().map(|&p| Reg::P(p)).collect();
-    for (&arg, &dst) in args.iter().zip(&arg_regs) {
-        insts.push(Inst::Mov {
-            dst,
-            src: vreg(arg),
-        });
-    }
+    let float_result = result.is_some_and(|r| func.value_type(r).is_float());
     insts.push(Inst::Call {
         symbol,
-        args: arg_regs[..args.len()].to_vec(),
-        ret: result.map(|_| Reg::P(PReg::RET)),
+        args: int_args,
+        ret: result.filter(|_| !float_result).map(|_| Reg::P(PReg::RET)),
     });
     if let Some(result) = result {
-        insts.push(Inst::Mov {
-            dst: vreg(result),
-            src: Reg::P(PReg::RET),
+        insts.push(if float_result {
+            Inst::FromXmm {
+                xmm: 0,
+                double: func.value_type(result) == Type::F64,
+                dst: vreg(result),
+            }
+        } else {
+            Inst::Mov {
+                dst: vreg(result),
+                src: Reg::P(PReg::RET),
+            }
         });
     }
     Ok(())

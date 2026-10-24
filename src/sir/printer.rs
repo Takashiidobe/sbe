@@ -88,6 +88,13 @@ impl Display for Function {
                 }
                 match self.inst(inst) {
                     InstData::Iconst { ty, value } => writeln!(f, "iconst {ty} {value}")?,
+                    InstData::Fconst { ty, bits } => writeln!(f, "fconst {ty} {bits:#x}")?,
+                    InstData::Fbinary { op, args: [a, b] } => {
+                        writeln!(f, "{} {a}, {b}", op.mnemonic())?
+                    }
+                    InstData::Fcmp { cc, args: [a, b] } => {
+                        writeln!(f, "fcmp {} {a}, {b}", cc.mnemonic())?
+                    }
                     InstData::Convert { op, ty, arg } => {
                         writeln!(f, "{} {ty} {arg}", op.mnemonic())?
                     }

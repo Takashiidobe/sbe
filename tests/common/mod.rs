@@ -177,3 +177,32 @@ pub fn switch_ping(sel: i64, n: i64) -> i64 {
 }
 
 pub const SWITCH_BYTE_SAMPLES: [i64; 8] = [0, 1, -1, 255, 257, -255, 256, 5];
+
+pub const FLOAT: &str = include_str!("../programs/float.sir");
+
+pub const FLOAT_SAMPLES: [f64; 7] = [0.0, -0.0, 1.5, -2.25, 1e10, f64::INFINITY, f64::NAN];
+
+pub fn float_cmp_all(a: f64, b: f64) -> i64 {
+    i64::from(a == b)
+        | i64::from(a != b) << 1
+        | i64::from(a < b) << 2
+        | i64::from(a <= b) << 3
+        | i64::from(a > b) << 4
+        | i64::from(a >= b) << 5
+}
+
+pub fn float_cmp_all32(a: f32, b: f32) -> i64 {
+    i64::from(a < b) | i64::from(a >= b) << 1
+}
+
+pub fn float_fsum(n: i64) -> f64 {
+    (0..n).map(|i| i as f64).sum()
+}
+
+pub fn float_mixed(a: i64, x: f64, b: i32, c: f32) -> f64 {
+    a as f64 + x + f64::from(b) + f64::from(c)
+}
+
+pub fn float_hyp(x: f64, n: i64, y: f32) -> f64 {
+    x + n as f64 + f64::from(y) * 2.0
+}

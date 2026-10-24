@@ -4,7 +4,7 @@ use super::ast::{
 };
 use super::error::{Failure, PResult, ParseErrorKind};
 use super::lexer::{Token, TokenKind};
-use crate::sir::{BinOp, CvtOp, IntCC, Type, UnOp};
+use crate::sir::{BinOp, CvtOp, FloatCC, FloatOp, IntCC, Type, UnOp};
 
 pub(super) struct Parser<'a> {
     src: &'a str,
@@ -298,6 +298,31 @@ impl<'a> Parser<'a> {
                 })?;
                 Op::Iconst(ty, value)
             }
+            "fconst" => {
+                let ty = self.ty()?;
+                let tok = self.expect(TokenKind::Int)?;
+                let text = tok.text(self.src);
+                let bits = text
+                    .strip_prefix("0x")
+                    .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+                    .ok_or_else(|| Failure {
+                        kind: ParseErrorKind::InvalidInteger(text.to_owned()),
+                        span: tok.span(),
+                    })?;
+                Op::Fconst(ty, bits)
+            }
+            "fcmp" => {
+                let cc_tok = self.expect(TokenKind::Ident)?;
+                let Some(cc) = FloatCC::from_mnemonic(cc_tok.text(self.src)) else {
+                    return Err(Failure {
+                        kind: ParseErrorKind::UnknownCondition(cc_tok.text(self.src).to_owned()),
+                        span: cc_tok.span(),
+                    });
+                };
+                let a = self.name()?;
+                self.expect(TokenKind::Comma)?;
+                Op::Fcmp(cc, a, self.name()?)
+            }
             "icmp" => {
                 let cc_tok = self.expect(TokenKind::Ident)?;
                 let Some(cc) = IntCC::from_mnemonic(cc_tok.text(self.src)) else {
@@ -330,6 +355,10 @@ impl<'a> Parser<'a> {
                 if let Some(op) = CvtOp::from_mnemonic(other) {
                     let ty = self.ty()?;
                     Op::Convert(op, ty, self.name()?)
+                } else if let Some(op) = FloatOp::from_mnemonic(other) {
+                    let a = self.name()?;
+                    self.expect(TokenKind::Comma)?;
+                    Op::Fbinary(op, a, self.name()?)
                 } else if let Some(op) = UnOp::from_mnemonic(other) {
                     Op::Unary(op, self.name()?)
                 } else if let Some(op) = BinOp::from_mnemonic(other) {

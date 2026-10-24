@@ -14,7 +14,8 @@ block0(v0: i64, v1: i64):
 
 ## Types and instructions
 
-Types are `i8`, `i16`, `i32` and `i64`. Instructions:
+Types are `i8`, `i16`, `i32`, `i64`, `f32` and `f64`. Integer ops reject float
+operands and float ops reject integers. Instructions:
 
 - `iconst <ty> <n>`: the value is truncated to `<ty>`.
 - Unary `ineg`, `bnot`. Binary `iadd`, `isub`, `imul`, `band`, `bor`, `bxor`,
@@ -26,6 +27,16 @@ Types are `i8`, `i16`, `i32` and `i64`. Instructions:
 - `call fnN(args)`: `fnN` is declared at the top of the function with
   `fnN = %name(types) -> type`. The call yields a value (`v1 = call fn0(v0)`)
   only when the callee returns one. Callees return at most one value.
+- `fconst <ty> 0x<bits>` gives the IEEE bit pattern in hex, so NaN payloads
+  and infinities are exact (the builder takes an `f64`). `fadd`, `fsub`, `fmul`,
+  `fdiv` take two floats of one type.
+- `fcmp <cc> a, b` with `eq ne lt le gt ge` yields an `i8` that is 0 or 1. Every
+  condition but `ne` is false when an operand is NaN; `ne` is true.
+- `fcvt_from_sint <fty> v` and `fcvt_to_sint <ity> v` convert between signed
+  ints and floats. A NaN or out-of-range float gives an unspecified int and
+  never traps. `fpromote f64 v`, `fdemote f32 v` change width. `bitcast <ty> v`
+  reinterprets a float as the int of the same width or back. There are no
+  unsigned conversions, `fneg`, `fabs` or `fsqrt`.
 - `load <ty> addr` reads memory; `store v, addr` writes it and yields nothing.
   Addresses are plain `i64` values: there is no pointer type, and the 64-bit
   width is fixed on every target.

@@ -63,6 +63,14 @@ pub enum VerifyError {
         to: Type,
     },
 
+    #[error("{user} needs {expected}, found {found}")]
+    #[diagnostic(code(sir::verify::type_kind))]
+    TypeKind {
+        user: Use,
+        expected: &'static str,
+        found: Type,
+    },
+
     #[error("{user} calls {callee}, which is not declared in this function")]
     #[diagnostic(code(sir::verify::unknown_callee))]
     UnknownCallee { user: Use, callee: FuncRef },
@@ -202,8 +210,12 @@ impl Verifier<'_> {
 
     fn check_inst(&mut self, user: Use, data: &InstData) {
         match data {
-            InstData::Iconst { .. } => {}
-            InstData::Unary { arg, .. } => self.check_same_type(user, *arg, *arg),
+            InstData::Iconst { ty, .. } => self.check_kind(user, *ty, true),
+            InstData::Fconst { ty, .. } => self.check_kind(user, *ty, false),
+            InstData::Unary { arg, .. } => {
+                self.check_same_type(user, *arg, *arg);
+                self.check_value_kind(user, *arg, true);
+            }
             InstData::Convert { op, ty, arg } => {
                 if self.func.contains_value(*arg) {
                     let from = self.func.value_type(*arg);
@@ -222,6 +234,11 @@ impl Verifier<'_> {
             }
             InstData::Binary { args: [a, b], .. } | InstData::Icmp { args: [a, b], .. } => {
                 self.check_same_type(user, *a, *b);
+                self.check_value_kind(user, *a, true);
+            }
+            InstData::Fbinary { args: [a, b], .. } | InstData::Fcmp { args: [a, b], .. } => {
+                self.check_same_type(user, *a, *b);
+                self.check_value_kind(user, *a, false);
             }
             InstData::Select {
                 args: [cond, then_value, else_value],
@@ -246,12 +263,33 @@ impl Verifier<'_> {
         }
     }
 
+    fn check_kind(&mut self, user: Use, ty: Type, int: bool) {
+        if ty.is_int() != int {
+            self.errors.push(VerifyError::TypeKind {
+                user,
+                expected: if int {
+                    "an integer type"
+                } else {
+                    "a float type"
+                },
+                found: ty,
+            });
+        }
+    }
+
+    fn check_value_kind(&mut self, user: Use, value: Value, int: bool) {
+        if self.func.contains_value(value) {
+            self.check_kind(user, self.func.value_type(value), int);
+        }
+    }
+
     fn check_switch(&mut self, block: Block, value: Value, cases: &[SwitchCase]) {
         let user = Use::Terminator(block);
         if !self.func.contains_value(value) {
             self.errors.push(VerifyError::UnknownValue { user, value });
             return;
         }
+        self.check_value_kind(user, value, true);
         let ty = self.func.value_type(value);
         let mut keys: Vec<u64> = cases.iter().map(|c| ty.truncate(c.key)).collect();
         keys.sort_unstable();

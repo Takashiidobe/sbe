@@ -1,4 +1,4 @@
-use sbe::sir::{BuilderError, FunctionBuilder, Signature, SwitchCase, Type, Value};
+use sbe::sir::{BuilderError, FloatCC, FunctionBuilder, Signature, SwitchCase, Type, Value};
 
 fn i64_sig(params: usize, returns: usize) -> Signature {
     Signature {
@@ -218,5 +218,32 @@ fn builds_switch_and_trap() {
          return v0\n\n\
          block2:\n    \
          trap\n}\n"
+    );
+}
+
+#[test]
+fn builds_float_ops() {
+    let signature = Signature {
+        params: vec![Type::F64],
+        returns: vec![Type::I8],
+    };
+    let mut builder = FunctionBuilder::new("f", signature);
+    let entry = builder.entry_block();
+    builder.switch_to_block(entry).unwrap();
+    let x = builder.block_params(entry).unwrap()[0];
+    let half = builder.fconst(Type::F64, 0.5).unwrap();
+    let scaled = builder.fbinary(sbe::sir::FloatOp::Fmul, x, half).unwrap();
+    let below = builder.fcmp(FloatCC::Lt, scaled, x).unwrap();
+    builder.ret(below).unwrap();
+
+    let func = builder.finish().unwrap();
+    assert_eq!(
+        func.to_string(),
+        "function %f(f64) -> i8 {\n\
+         block0(v0: f64):\n    \
+         v1 = fconst f64 0x3fe0000000000000\n    \
+         v2 = fmul v0, v1\n    \
+         v3 = fcmp lt v2, v0\n    \
+         return v3\n}\n"
     );
 }

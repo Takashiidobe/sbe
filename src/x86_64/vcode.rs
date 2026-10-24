@@ -203,6 +203,63 @@ impl Cc {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+impl FpOp {
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            FpOp::Add => "add",
+            FpOp::Sub => "sub",
+            FpOp::Mul => "mul",
+            FpOp::Div => "div",
+        }
+    }
+}
+
+/// the sse compare predicates; each is false when an operand is NaN except `Neq`
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpPred {
+    Eq,
+    Lt,
+    Le,
+    Neq,
+}
+
+impl FpPred {
+    pub fn imm(self) -> i32 {
+        match self {
+            FpPred::Eq => 0,
+            FpPred::Lt => 1,
+            FpPred::Le => 2,
+            FpPred::Neq => 4,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            FpPred::Eq => "eq",
+            FpPred::Lt => "lt",
+            FpPred::Le => "le",
+            FpPred::Neq => "neq",
+        }
+    }
+}
+
+/// `double` says whether the float side is an `f64`; the integer side is always 64-bit
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpConvert {
+    FromInt { double: bool },
+    ToInt { double: bool },
+    Promote,
+    Demote,
+}
+
 /// `Call` reads its argument registers and defines the result register; every caller-saved
 /// register is clobbered. `Push`, `Pop` and `AdjustSp` only appear in the prologue and epilogue
 /// that allocation adds; `AdjustSp` subtracts its byte count from `rsp`.
@@ -306,6 +363,39 @@ pub enum Inst<R> {
         dst: R,
         offset: u32,
     },
+    /// floats live in general registers; each float op below moves its operands into `xmm0` and
+    /// `xmm1`, computes there, and moves the result back
+    FBin {
+        op: FpOp,
+        double: bool,
+        dst: R,
+        a: R,
+        b: R,
+    },
+    /// `dst` is 1 when `a pred b` holds and 0 otherwise
+    FCmp {
+        pred: FpPred,
+        double: bool,
+        dst: R,
+        a: R,
+        b: R,
+    },
+    FCvt {
+        kind: FpConvert,
+        dst: R,
+        src: R,
+    },
+    /// the abi passes floats in `xmm0..xmm7`; these move to and from them
+    ToXmm {
+        xmm: u8,
+        double: bool,
+        src: R,
+    },
+    FromXmm {
+        xmm: u8,
+        double: bool,
+        dst: R,
+    },
     Push {
         reg: R,
     },
@@ -329,6 +419,9 @@ impl<R: Copy> Inst<R> {
             | Inst::Pop { .. }
             | Inst::AdjustSp { .. }
             | Inst::StackAddr { .. } => vec![],
+            Inst::FBin { a, b, .. } | Inst::FCmp { a, b, .. } => vec![a, b],
+            Inst::FCvt { src, .. } | Inst::ToXmm { src, .. } => vec![src],
+            Inst::FromXmm { .. } => vec![],
             Inst::Load { addr, .. } => vec![addr],
             Inst::Store { addr, src, .. } => vec![addr, src],
             Inst::Call { ref args, .. } => args.clone(),
@@ -361,6 +454,10 @@ impl<R: Copy> Inst<R> {
             | Inst::Movzx8 { dst }
             | Inst::Ext { dst, .. }
             | Inst::Load { dst, .. }
+            | Inst::FBin { dst, .. }
+            | Inst::FCmp { dst, .. }
+            | Inst::FCvt { dst, .. }
+            | Inst::FromXmm { dst, .. }
             | Inst::StackAddr { dst, .. }
             | Inst::Cmov { dst, .. } => vec![dst],
             Inst::Pop { reg } => vec![reg],
@@ -375,6 +472,7 @@ impl<R: Copy> Inst<R> {
             | Inst::Jmp { .. }
             | Inst::Ret { .. }
             | Inst::Store { .. }
+            | Inst::ToXmm { .. }
             | Inst::Push { .. }
             | Inst::AdjustSp { .. } => vec![],
         }
@@ -454,6 +552,47 @@ impl<R: Copy> Inst<R> {
                 args: args.iter().map(|&r| f(r)).collect(),
                 ret: ret.map(&mut f),
             },
+            Inst::FBin {
+                op,
+                double,
+                dst,
+                a,
+                b,
+            } => Inst::FBin {
+                op,
+                double,
+                dst: f(dst),
+                a: f(a),
+                b: f(b),
+            },
+            Inst::FCmp {
+                pred,
+                double,
+                dst,
+                a,
+                b,
+            } => Inst::FCmp {
+                pred,
+                double,
+                dst: f(dst),
+                a: f(a),
+                b: f(b),
+            },
+            Inst::FCvt { kind, dst, src } => Inst::FCvt {
+                kind,
+                dst: f(dst),
+                src: f(src),
+            },
+            Inst::ToXmm { xmm, double, src } => Inst::ToXmm {
+                xmm,
+                double,
+                src: f(src),
+            },
+            Inst::FromXmm { xmm, double, dst } => Inst::FromXmm {
+                xmm,
+                double,
+                dst: f(dst),
+            },
             Inst::Load { bits, dst, addr } => Inst::Load {
                 bits,
                 dst: f(dst),
@@ -508,6 +647,33 @@ impl<R: fmt::Display> fmt::Display for Inst<R> {
             Inst::Jmp { target } => write!(f, "jmp {target}"),
             Inst::Ret { .. } => f.write_str("ret"),
             Inst::Call { symbol, .. } => write!(f, "call %{symbol}"),
+            Inst::FBin {
+                op,
+                double,
+                dst,
+                a,
+                b,
+            } => write!(
+                f,
+                "f{}{} {dst}, {a}, {b}",
+                op.mnemonic(),
+                if *double { "sd" } else { "ss" }
+            ),
+            Inst::FCmp {
+                pred,
+                double,
+                dst,
+                a,
+                b,
+            } => write!(
+                f,
+                "fcmp{}{} {dst}, {a}, {b}",
+                pred.name(),
+                if *double { "sd" } else { "ss" }
+            ),
+            Inst::FCvt { kind, dst, src } => write!(f, "fcvt {kind:?} {dst}, {src}"),
+            Inst::ToXmm { xmm, src, .. } => write!(f, "movq xmm{xmm}, {src}"),
+            Inst::FromXmm { xmm, dst, .. } => write!(f, "movq {dst}, xmm{xmm}"),
             Inst::Load { bits, dst, addr } => write!(f, "load{bits} {dst}, [{addr}]"),
             Inst::Store { bits, addr, src } => write!(f, "store{bits} [{addr}], {src}"),
             Inst::StackAddr { dst, offset } => write!(f, "lea {dst}, [rsp + {offset}]"),

@@ -86,16 +86,38 @@ pub enum CvtOp {
     Sextend,
     Uextend,
     Ireduce,
+    /// signed int to float
+    FcvtFromSint,
+    /// float to signed int; a NaN or out-of-range input gives an unspecified value, never a trap
+    FcvtToSint,
+    Fpromote,
+    Fdemote,
+    /// reinterprets the bits as a type of the same width
+    Bitcast,
 }
 
 impl CvtOp {
-    const ALL: [CvtOp; 3] = [CvtOp::Sextend, CvtOp::Uextend, CvtOp::Ireduce];
+    const ALL: [CvtOp; 8] = [
+        CvtOp::Sextend,
+        CvtOp::Uextend,
+        CvtOp::Ireduce,
+        CvtOp::FcvtFromSint,
+        CvtOp::FcvtToSint,
+        CvtOp::Fpromote,
+        CvtOp::Fdemote,
+        CvtOp::Bitcast,
+    ];
 
     pub fn mnemonic(self) -> &'static str {
         match self {
             CvtOp::Sextend => "sextend",
             CvtOp::Uextend => "uextend",
             CvtOp::Ireduce => "ireduce",
+            CvtOp::FcvtFromSint => "fcvt_from_sint",
+            CvtOp::FcvtToSint => "fcvt_to_sint",
+            CvtOp::Fpromote => "fpromote",
+            CvtOp::Fdemote => "fdemote",
+            CvtOp::Bitcast => "bitcast",
         }
     }
 
@@ -103,12 +125,83 @@ impl CvtOp {
         Self::ALL.into_iter().find(|op| op.mnemonic() == text)
     }
 
-    /// extends must widen and reduces must narrow
+    /// extends must widen and reduces must narrow, among ints; float conversions must cross
+    /// between the kinds they name
     pub fn accepts(self, from: Type, to: Type) -> bool {
         match self {
-            CvtOp::Sextend | CvtOp::Uextend => to.bits() > from.bits(),
-            CvtOp::Ireduce => to.bits() < from.bits(),
+            CvtOp::Sextend | CvtOp::Uextend => {
+                from.is_int() && to.is_int() && to.bits() > from.bits()
+            }
+            CvtOp::Ireduce => from.is_int() && to.is_int() && to.bits() < from.bits(),
+            CvtOp::FcvtFromSint => from.is_int() && to.is_float(),
+            CvtOp::FcvtToSint => from.is_float() && to.is_int(),
+            CvtOp::Fpromote => from == Type::F32 && to == Type::F64,
+            CvtOp::Fdemote => from == Type::F64 && to == Type::F32,
+            CvtOp::Bitcast => from.bits() == to.bits() && from.is_float() != to.is_float(),
         }
+    }
+}
+
+/// binary float ops take two operands of one float type and yield that type
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FloatOp {
+    Fadd,
+    Fsub,
+    Fmul,
+    Fdiv,
+}
+
+impl FloatOp {
+    const ALL: [FloatOp; 4] = [FloatOp::Fadd, FloatOp::Fsub, FloatOp::Fmul, FloatOp::Fdiv];
+
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            FloatOp::Fadd => "fadd",
+            FloatOp::Fsub => "fsub",
+            FloatOp::Fmul => "fmul",
+            FloatOp::Fdiv => "fdiv",
+        }
+    }
+
+    pub fn from_mnemonic(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|op| op.mnemonic() == text)
+    }
+}
+
+/// every condition but `Ne` is false when an operand is NaN; `Ne` is true
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FloatCC {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+impl FloatCC {
+    const ALL: [FloatCC; 6] = [
+        FloatCC::Eq,
+        FloatCC::Ne,
+        FloatCC::Lt,
+        FloatCC::Le,
+        FloatCC::Gt,
+        FloatCC::Ge,
+    ];
+
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            FloatCC::Eq => "eq",
+            FloatCC::Ne => "ne",
+            FloatCC::Lt => "lt",
+            FloatCC::Le => "le",
+            FloatCC::Gt => "gt",
+            FloatCC::Ge => "ge",
+        }
+    }
+
+    pub fn from_mnemonic(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|cc| cc.mnemonic() == text)
     }
 }
 
@@ -167,6 +260,20 @@ pub enum InstData {
         ty: Type,
         value: i64,
     },
+    /// `bits` holds the IEEE pattern; an `f32` uses the low 32 bits
+    Fconst {
+        ty: Type,
+        bits: u64,
+    },
+    Fbinary {
+        op: FloatOp,
+        args: [Value; 2],
+    },
+    /// compares two floats of one type and yields an i8 that is exactly 0 or 1
+    Fcmp {
+        cc: FloatCC,
+        args: [Value; 2],
+    },
     Unary {
         op: UnOp,
         arg: Value,
@@ -223,7 +330,9 @@ impl InstData {
             InstData::Iconst { ty, .. } | InstData::Convert { ty, .. } => *ty,
             InstData::Unary { arg, .. } => type_of(*arg),
             InstData::Binary { args: [a, _], .. } => type_of(*a),
-            InstData::Icmp { .. } => Type::I8,
+            InstData::Icmp { .. } | InstData::Fcmp { .. } => Type::I8,
+            InstData::Fbinary { args: [a, _], .. } => type_of(*a),
+            InstData::Fconst { ty, .. } => *ty,
             InstData::Select {
                 args: [_, then_value, _],
             } => type_of(*then_value),
@@ -236,13 +345,16 @@ impl InstData {
 
     pub fn args(&self) -> &[Value] {
         match self {
-            InstData::Iconst { .. } | InstData::StackAddr { .. } => &[],
+            InstData::Iconst { .. } | InstData::Fconst { .. } | InstData::StackAddr { .. } => &[],
             InstData::Load { addr, .. } => std::slice::from_ref(addr),
             InstData::Store { args } => args,
             InstData::Unary { arg, .. } | InstData::Convert { arg, .. } => {
                 std::slice::from_ref(arg)
             }
-            InstData::Binary { args, .. } | InstData::Icmp { args, .. } => args,
+            InstData::Binary { args, .. }
+            | InstData::Icmp { args, .. }
+            | InstData::Fbinary { args, .. }
+            | InstData::Fcmp { args, .. } => args,
             InstData::Select { args } => args,
             InstData::Call { args, .. } => args,
         }

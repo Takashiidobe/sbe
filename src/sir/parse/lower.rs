@@ -160,6 +160,18 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
                     ty: *ty,
                     value: *value,
                 },
+                Op::Fconst(ty, bits) => InstData::Fconst {
+                    ty: *ty,
+                    bits: *bits,
+                },
+                Op::Fbinary(op, a, b) => InstData::Fbinary {
+                    op: *op,
+                    args: [names.value(*a)?, names.value(*b)?],
+                },
+                Op::Fcmp(cc, a, b) => InstData::Fcmp {
+                    cc: *cc,
+                    args: [names.value(*a)?, names.value(*b)?],
+                },
                 Op::Convert(op, ty, arg) => InstData::Convert {
                     op: *op,
                     ty: *ty,

@@ -9,8 +9,8 @@ use wasm_encoder::{
 
 use super::error::CompileError;
 use crate::sir::{
-    BinOp, Block, ControlFlow, CvtOp, Function, InstData, IntCC, Module, Signature, Terminator,
-    Type, UnOp, Value, ValueDef, verify_module,
+    BinOp, Block, ControlFlow, CvtOp, FloatCC, FloatOp, Function, InstData, IntCC, Module,
+    Signature, Terminator, Type, UnOp, Value, ValueDef, verify_module,
 };
 
 /// linear memory is one page; the shadow stack grows down from its end, and its pointer is the
@@ -64,6 +64,8 @@ impl Emitter<'_> {
             Type::I16 => Instruction::I32Load16U(Self::mem_arg()),
             Type::I32 => Instruction::I32Load(Self::mem_arg()),
             Type::I64 => Instruction::I64Load(Self::mem_arg()),
+            Type::F32 => Instruction::F32Load(Self::mem_arg()),
+            Type::F64 => Instruction::F64Load(Self::mem_arg()),
         });
     }
 
@@ -76,6 +78,8 @@ impl Emitter<'_> {
             Type::I16 => Instruction::I32Store16(Self::mem_arg()),
             Type::I32 => Instruction::I32Store(Self::mem_arg()),
             Type::I64 => Instruction::I64Store(Self::mem_arg()),
+            Type::F32 => Instruction::F32Store(Self::mem_arg()),
+            Type::F64 => Instruction::F64Store(Self::mem_arg()),
         });
     }
 
@@ -112,7 +116,10 @@ impl Emitter<'_> {
     fn get_cond(&mut self, value: Value) {
         self.get(value);
         let from_icmp = match self.func.value_def(value) {
-            ValueDef::Result(inst) => matches!(self.func.inst(inst), InstData::Icmp { .. }),
+            ValueDef::Result(inst) => matches!(
+                self.func.inst(inst),
+                InstData::Icmp { .. } | InstData::Fcmp { .. }
+            ),
             ValueDef::Param(..) => false,
         };
         if !from_icmp {
@@ -223,9 +230,76 @@ impl Emitter<'_> {
         });
     }
 
+    fn emit_float_binary(&mut self, op: FloatOp, a: Value, b: Value) {
+        self.get(a);
+        self.get(b);
+        let double = self.ty(a) == Type::F64;
+        self.op(match (double, op) {
+            (true, FloatOp::Fadd) => Instruction::F64Add,
+            (true, FloatOp::Fsub) => Instruction::F64Sub,
+            (true, FloatOp::Fmul) => Instruction::F64Mul,
+            (true, FloatOp::Fdiv) => Instruction::F64Div,
+            (false, FloatOp::Fadd) => Instruction::F32Add,
+            (false, FloatOp::Fsub) => Instruction::F32Sub,
+            (false, FloatOp::Fmul) => Instruction::F32Mul,
+            (false, FloatOp::Fdiv) => Instruction::F32Div,
+        });
+    }
+
+    fn emit_fcmp(&mut self, cc: FloatCC, a: Value, b: Value) {
+        self.get(a);
+        self.get(b);
+        let double = self.ty(a) == Type::F64;
+        self.op(match (double, cc) {
+            (true, FloatCC::Eq) => Instruction::F64Eq,
+            (true, FloatCC::Ne) => Instruction::F64Ne,
+            (true, FloatCC::Lt) => Instruction::F64Lt,
+            (true, FloatCC::Le) => Instruction::F64Le,
+            (true, FloatCC::Gt) => Instruction::F64Gt,
+            (true, FloatCC::Ge) => Instruction::F64Ge,
+            (false, FloatCC::Eq) => Instruction::F32Eq,
+            (false, FloatCC::Ne) => Instruction::F32Ne,
+            (false, FloatCC::Lt) => Instruction::F32Lt,
+            (false, FloatCC::Le) => Instruction::F32Le,
+            (false, FloatCC::Gt) => Instruction::F32Gt,
+            (false, FloatCC::Ge) => Instruction::F32Ge,
+        });
+    }
+
+    fn emit_float_convert(&mut self, op: CvtOp, ty: Type, arg: Value) {
+        let from = self.ty(arg);
+        if op == CvtOp::FcvtFromSint {
+            self.get_extended(arg, true);
+        } else {
+            self.get(arg);
+        }
+        self.op(match (op, from, ty) {
+            (CvtOp::FcvtFromSint, Type::I64, Type::F64) => Instruction::F64ConvertI64S,
+            (CvtOp::FcvtFromSint, Type::I64, _) => Instruction::F32ConvertI64S,
+            (CvtOp::FcvtFromSint, _, Type::F64) => Instruction::F64ConvertI32S,
+            (CvtOp::FcvtFromSint, _, _) => Instruction::F32ConvertI32S,
+            (CvtOp::FcvtToSint, Type::F64, Type::I64) => Instruction::I64TruncSatF64S,
+            (CvtOp::FcvtToSint, Type::F32, Type::I64) => Instruction::I64TruncSatF32S,
+            (CvtOp::FcvtToSint, Type::F64, _) => Instruction::I32TruncSatF64S,
+            (CvtOp::FcvtToSint, _, _) => Instruction::I32TruncSatF32S,
+            (CvtOp::Fpromote, ..) => Instruction::F64PromoteF32,
+            (CvtOp::Fdemote, ..) => Instruction::F32DemoteF64,
+            (CvtOp::Bitcast, Type::F32, _) => Instruction::I32ReinterpretF32,
+            (CvtOp::Bitcast, Type::F64, _) => Instruction::I64ReinterpretF64,
+            (CvtOp::Bitcast, Type::I32, _) => Instruction::F32ReinterpretI32,
+            (CvtOp::Bitcast, _, _) => Instruction::F64ReinterpretI64,
+            _ => unreachable!("not a float conversion"),
+        });
+    }
+
     fn emit_convert(&mut self, op: CvtOp, ty: Type, arg: Value) {
         let to_i64 = ty == Type::I64;
         match op {
+            CvtOp::FcvtFromSint
+            | CvtOp::FcvtToSint
+            | CvtOp::Fpromote
+            | CvtOp::Fdemote
+            | CvtOp::Bitcast => self.emit_float_convert(op, ty, arg),
             CvtOp::Sextend | CvtOp::Uextend => {
                 let signed = op == CvtOp::Sextend;
                 self.get_extended(arg, signed);
@@ -256,6 +330,12 @@ impl Emitter<'_> {
                     value,
                 } => self.op(Instruction::I64Const(*value)),
                 InstData::Iconst { value, .. } => self.op(Instruction::I32Const(*value as i32)),
+                InstData::Fconst { ty, bits } => self.op(match ty {
+                    Type::F32 => Instruction::F32Const(f32::from_bits(*bits as u32).into()),
+                    _ => Instruction::F64Const(f64::from_bits(*bits).into()),
+                }),
+                InstData::Fbinary { op, args: [a, b] } => self.emit_float_binary(*op, *a, *b),
+                InstData::Fcmp { cc, args: [a, b] } => self.emit_fcmp(*cc, *a, *b),
                 InstData::Convert { op, ty, arg } => self.emit_convert(*op, *ty, *arg),
                 InstData::Icmp { cc, args: [a, b] } => self.emit_icmp(*cc, *a, *b),
                 InstData::Select {
@@ -744,5 +824,7 @@ fn val_type(ty: Type) -> ValType {
     match ty {
         Type::I8 | Type::I16 | Type::I32 => ValType::I32,
         Type::I64 => ValType::I64,
+        Type::F32 => ValType::F32,
+        Type::F64 => ValType::F64,
     }
 }
