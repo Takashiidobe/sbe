@@ -1,0 +1,6 @@
+; test parse-error
+; check: entry block params do not match the function signature
+function %f(i64) {
+block0:
+    return
+}

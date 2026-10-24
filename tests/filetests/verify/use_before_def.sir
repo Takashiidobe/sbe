@@ -1,0 +1,9 @@
+; test verify
+; check: function %f failed verification
+; check: inst0 uses v1, whose definition does not dominate the use
+function %f() -> i64 {
+block0:
+    v0 = iadd v1, v1
+    v1 = iconst 1
+    return v0
+}

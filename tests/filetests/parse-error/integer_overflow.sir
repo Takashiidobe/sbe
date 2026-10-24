@@ -1,0 +1,7 @@
+; test parse-error
+; check: invalid integer `9223372036854775808`
+function %f() {
+block0:
+    v0 = iconst 9223372036854775808
+    return
+}

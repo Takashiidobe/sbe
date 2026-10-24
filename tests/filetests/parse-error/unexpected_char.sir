@@ -1,0 +1,8 @@
+; test parse-error
+; check: unexpected character `$$`
+; check: label at line 6, column 17: here
+function %f() {
+block0:
+    v0 = iconst $
+    return
+}

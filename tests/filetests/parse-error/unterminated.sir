@@ -1,0 +1,5 @@
+; test parse-error
+; check: expected `}`, found end of input
+function %f() {
+block0:
+    return

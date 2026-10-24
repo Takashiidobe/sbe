@@ -1,0 +1,6 @@
+; test verify
+; check: block0 returns the wrong number of values for the signature
+function %f() -> i64 {
+block0:
+    return
+}

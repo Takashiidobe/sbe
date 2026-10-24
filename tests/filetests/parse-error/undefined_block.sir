@@ -1,0 +1,6 @@
+; test parse-error
+; check: block `nowhere` is not defined
+function %f() {
+block0:
+    jump nowhere
+}

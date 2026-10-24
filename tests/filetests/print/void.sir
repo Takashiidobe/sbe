@@ -1,0 +1,13 @@
+; test print
+
+; check: function %nop() {
+; nextln: block0:
+; nextln:     jump block1
+; check: block1:
+; nextln:     return
+function %nop() {
+block0:
+    jump block1
+block1:
+    return
+}

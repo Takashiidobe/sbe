@@ -1,0 +1,8 @@
+; test parse-error
+; check: value `v0` is defined more than once
+function %f() {
+block0:
+    v0 = iconst 1
+    v0 = iconst 2
+    return
+}

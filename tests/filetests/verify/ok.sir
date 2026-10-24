@@ -1,0 +1,7 @@
+; test verify
+; check: ok
+function %f() -> i64 {
+block0:
+    v0 = iconst 1
+    return v0
+}

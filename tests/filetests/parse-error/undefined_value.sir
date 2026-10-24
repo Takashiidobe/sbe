@@ -1,0 +1,7 @@
+; test parse-error
+; check: value `v9` is not defined
+; check: label at line 6, columns 12 to 13: here
+function %f() -> i64 {
+block0:
+    return v9
+}

@@ -1,0 +1,23 @@
+; test print
+; a block may use a value defined in a block listed after it
+
+; check: block0:
+; nextln:     v0 = iconst 7
+; nextln:     jump block2
+; check: block1:
+; nextln:     return v1
+; check: block2:
+; nextln:     v1 = iadd v0, v0
+; nextln:     jump block1
+function %fwd() -> i64 {
+block0:
+    v0 = iconst 7
+    jump block2
+
+block1:
+    return v1
+
+block2:
+    v1 = iadd v0, v0
+    jump block1
+}

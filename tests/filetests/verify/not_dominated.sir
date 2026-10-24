@@ -1,0 +1,14 @@
+; test verify
+; block1 is only reachable from block0, so block2's value is never available there
+; check: the terminator of block1 uses v0, whose definition does not dominate the use
+function %f() -> i64 {
+block0:
+    jump block1
+
+block1:
+    return v0
+
+block2:
+    v0 = iconst 1
+    jump block1
+}

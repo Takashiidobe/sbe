@@ -1,0 +1,4 @@
+; test parse-error
+; check: function has no blocks
+function %f() {
+}

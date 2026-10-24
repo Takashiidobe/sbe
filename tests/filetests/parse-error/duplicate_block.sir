@@ -1,0 +1,8 @@
+; test parse-error
+; check: block `block0` is defined more than once
+function %f() {
+block0:
+    jump block0
+block0:
+    return
+}

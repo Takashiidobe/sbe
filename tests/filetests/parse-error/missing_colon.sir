@@ -1,0 +1,7 @@
+; test parse-error
+; check: expected `:`, found `v0`
+function %f() {
+block0
+    v0 = iconst 1
+    return
+}
