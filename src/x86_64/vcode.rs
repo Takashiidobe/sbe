@@ -285,6 +285,22 @@ pub enum Inst<R> {
         args: Vec<R>,
         ret: Option<R>,
     },
+    /// reads `bits` from `[addr]`; the upper bits of `dst` are zeroed
+    Load {
+        bits: u8,
+        dst: R,
+        addr: R,
+    },
+    Store {
+        bits: u8,
+        addr: R,
+        src: R,
+    },
+    /// `lea dst, [rsp + offset]`, valid once the prologue has reserved the stack slots
+    StackAddr {
+        dst: R,
+        offset: u32,
+    },
     Push {
         reg: R,
     },
@@ -304,7 +320,10 @@ impl<R: Copy> Inst<R> {
             | Inst::Jmp { .. }
             | Inst::Ret { .. }
             | Inst::Pop { .. }
-            | Inst::AdjustSp { .. } => vec![],
+            | Inst::AdjustSp { .. }
+            | Inst::StackAddr { .. } => vec![],
+            Inst::Load { addr, .. } => vec![addr],
+            Inst::Store { addr, src, .. } => vec![addr, src],
             Inst::Call { ref args, .. } => args.clone(),
             Inst::Push { reg } => vec![reg],
             Inst::Mov { src, .. } => vec![src],
@@ -334,6 +353,8 @@ impl<R: Copy> Inst<R> {
             | Inst::Setcc { dst, .. }
             | Inst::Movzx8 { dst }
             | Inst::Ext { dst, .. }
+            | Inst::Load { dst, .. }
+            | Inst::StackAddr { dst, .. }
             | Inst::Cmov { dst, .. } => vec![dst],
             Inst::Pop { reg } => vec![reg],
             Inst::Call { ret, .. } => ret.into_iter().collect(),
@@ -344,6 +365,7 @@ impl<R: Copy> Inst<R> {
             | Inst::Jnz { .. }
             | Inst::Jmp { .. }
             | Inst::Ret { .. }
+            | Inst::Store { .. }
             | Inst::Push { .. }
             | Inst::AdjustSp { .. } => vec![],
         }
@@ -421,6 +443,20 @@ impl<R: Copy> Inst<R> {
                 args: args.iter().map(|&r| f(r)).collect(),
                 ret: ret.map(&mut f),
             },
+            Inst::Load { bits, dst, addr } => Inst::Load {
+                bits,
+                dst: f(dst),
+                addr: f(addr),
+            },
+            Inst::Store { bits, addr, src } => Inst::Store {
+                bits,
+                addr: f(addr),
+                src: f(src),
+            },
+            Inst::StackAddr { dst, offset } => Inst::StackAddr {
+                dst: f(dst),
+                offset,
+            },
             Inst::Push { reg } => Inst::Push { reg: f(reg) },
             Inst::Pop { reg } => Inst::Pop { reg: f(reg) },
             Inst::AdjustSp { bytes } => Inst::AdjustSp { bytes },
@@ -459,6 +495,9 @@ impl<R: fmt::Display> fmt::Display for Inst<R> {
             Inst::Jmp { target } => write!(f, "jmp {target}"),
             Inst::Ret { .. } => f.write_str("ret"),
             Inst::Call { symbol, .. } => write!(f, "call %{symbol}"),
+            Inst::Load { bits, dst, addr } => write!(f, "load{bits} {dst}, [{addr}]"),
+            Inst::Store { bits, addr, src } => write!(f, "store{bits} [{addr}], {src}"),
+            Inst::StackAddr { dst, offset } => write!(f, "lea {dst}, [rsp + {offset}]"),
             Inst::Push { reg } => write!(f, "push {reg}"),
             Inst::Pop { reg } => write!(f, "pop {reg}"),
             Inst::AdjustSp { bytes } => write!(f, "sub rsp, {bytes}"),
@@ -476,6 +515,8 @@ pub struct VBlock<R> {
 pub struct VCode<R> {
     pub name: String,
     pub blocks: Vec<VBlock<R>>,
+    /// bytes reserved below the saved registers for stack slots, a multiple of 8
+    pub stack_size: u32,
 }
 
 impl<R: fmt::Display> fmt::Display for VCode<R> {

@@ -21,6 +21,9 @@ pub(super) enum Op<'a> {
     Select(Name<'a>, Name<'a>, Name<'a>),
     Binary(BinOp, Name<'a>, Name<'a>),
     Call(Name<'a>, Vec<Name<'a>>),
+    Load(Type, Name<'a>),
+    Store(Name<'a>, Name<'a>),
+    StackAddr(Name<'a>),
 }
 
 pub(super) struct InstAst<'a> {
@@ -53,8 +56,14 @@ pub(super) struct CalleeAst<'a> {
     pub returns: Vec<Type>,
 }
 
+pub(super) struct StackSlotAst<'a> {
+    pub alias: Name<'a>,
+    pub size: u32,
+}
+
 pub(super) struct FunctionAst<'a> {
     pub name: &'a str,
+    pub stack_slots: Vec<StackSlotAst<'a>>,
     pub callees: Vec<CalleeAst<'a>>,
     pub params: Vec<Type>,
     pub returns: Vec<Type>,

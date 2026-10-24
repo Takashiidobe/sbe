@@ -2,12 +2,13 @@ use std::collections::HashMap;
 
 use super::ast::{FunctionAst, Name, Op, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
-use crate::sir::{Block, FuncRef, Function, InstData, Signature, Terminator, Value};
+use crate::sir::{Block, FuncRef, Function, InstData, Signature, StackSlot, Terminator, Value};
 
 struct Names<'a> {
     values: HashMap<&'a str, Value>,
     blocks: HashMap<&'a str, Block>,
     callees: HashMap<&'a str, FuncRef>,
+    stack_slots: HashMap<&'a str, StackSlot>,
 }
 
 impl<'a> Names<'a> {
@@ -21,6 +22,13 @@ impl<'a> Names<'a> {
     fn callee(&self, name: Name<'a>) -> PResult<FuncRef> {
         self.callees.get(name.text).copied().ok_or(Failure {
             kind: ParseErrorKind::UndefinedCallee(name.text.to_owned()),
+            span: name.span,
+        })
+    }
+
+    fn stack_slot(&self, name: Name<'a>) -> PResult<StackSlot> {
+        self.stack_slots.get(name.text).copied().ok_or(Failure {
+            kind: ParseErrorKind::UndefinedStackSlot(name.text.to_owned()),
             span: name.span,
         })
     }
@@ -78,7 +86,17 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
         values: HashMap::new(),
         blocks: HashMap::new(),
         callees: HashMap::new(),
+        stack_slots: HashMap::new(),
     };
+    for slot in &ast.stack_slots {
+        let id = func.create_stack_slot(slot.size);
+        if names.stack_slots.insert(slot.alias.text, id).is_some() {
+            return Err(Failure {
+                kind: ParseErrorKind::DuplicateStackSlot(slot.alias.text.to_owned()),
+                span: slot.alias.span,
+            });
+        }
+    }
     for callee in &ast.callees {
         let id = func.declare_callee(
             callee.name,
@@ -164,6 +182,17 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
                     op: *op,
                     args: [names.value(*a)?, names.value(*b)?],
                 },
+                Op::Load(ty, addr) => InstData::Load {
+                    ty: *ty,
+                    addr: names.value(*addr)?,
+                },
+                Op::StackAddr(slot) => InstData::StackAddr {
+                    slot: names.stack_slot(*slot)?,
+                },
+                Op::Store(value, addr) => {
+                    func.push_store(id, names.value(*value)?, names.value(*addr)?);
+                    continue;
+                }
                 Op::Call(callee_name, args) => {
                     let callee = names.callee(*callee_name)?;
                     let returns = !func.callee(callee).signature.returns.is_empty();
@@ -184,7 +213,7 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
                 }
             };
             let value = func.push_inst(id, data);
-            debug_assert_eq!(names.values[inst.result.expect("not a call").text], value);
+            debug_assert_eq!(names.values[inst.result.expect("not void").text], value);
         }
         let terminator = match &block.terminator {
             Some(TermAst::Return(values)) => Terminator::Return {

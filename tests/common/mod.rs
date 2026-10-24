@@ -131,3 +131,21 @@ pub fn calls_pair(a: i64, b: i64) -> i64 {
 pub fn calls_sum5(args: [i64; 5]) -> i64 {
     calls_scale(args[0]) + args.iter().sum::<i64>()
 }
+
+pub const MEMORY: &str = include_str!("../programs/memory.sir");
+
+pub fn memory_triple(x: i64) -> i64 {
+    x.wrapping_mul(3)
+}
+
+pub fn memory_widths(x: i64) -> i64 {
+    i64::from(x as u8) + i64::from(x as u16) + i64::from(x as u32)
+}
+
+pub fn memory_squares(n: i64) -> i64 {
+    (0..n).map(|i| i * i).sum()
+}
+
+pub fn memory_rec(n: i64) -> i64 {
+    (1..=n).sum()
+}

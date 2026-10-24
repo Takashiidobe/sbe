@@ -163,24 +163,28 @@ pub fn allocate(code: VCode<Reg>) -> Result<VCode<PReg>, CompileError> {
         })
         .collect();
 
-    if has_call {
-        add_frame(&mut blocks, &assignment);
+    if has_call || code.stack_size > 0 {
+        add_frame(&mut blocks, &assignment, code.stack_size);
     }
 
     Ok(VCode {
         name: code.name,
         blocks,
+        stack_size: code.stack_size,
     })
 }
 
-/// saves the callee-saved registers the function uses. the return address leaves `rsp` 8 off a
-/// 16-byte boundary, so an even number of pushes needs 8 more bytes to keep calls aligned.
-fn add_frame(blocks: &mut [VBlock<PReg>], assignment: &BTreeMap<VReg, PReg>) {
+/// saves the callee-saved registers the function uses and reserves the stack slots. the return
+/// address leaves `rsp` 8 off a 16-byte boundary, so the frame is padded to keep calls aligned.
+fn add_frame(blocks: &mut [VBlock<PReg>], assignment: &BTreeMap<VReg, PReg>, stack_size: u32) {
     let saved: Vec<PReg> = PReg::CALLEE_SAVED
         .into_iter()
         .filter(|p| assignment.values().any(|q| q == p))
         .collect();
-    let padding = if saved.len().is_multiple_of(2) { 8 } else { 0 };
+    let mut padding = stack_size as i32;
+    if (saved.len() as i32 * 8 + padding) % 16 == 0 {
+        padding += 8;
+    }
 
     let mut prologue: Vec<Inst<PReg>> = saved.iter().map(|&reg| Inst::Push { reg }).collect();
     let mut epilogue: Vec<Inst<PReg>> = saved.iter().rev().map(|&reg| Inst::Pop { reg }).collect();

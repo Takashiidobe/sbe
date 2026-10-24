@@ -1,4 +1,4 @@
-use super::{Block, FuncRef, Inst, InstData, Terminator, Type, Value};
+use super::{Block, FuncRef, Inst, InstData, StackSlot, Terminator, Type, Value};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Signature {
@@ -57,6 +57,7 @@ pub struct Function {
     name: String,
     signature: Signature,
     callees: Vec<Callee>,
+    stack_slots: Vec<u32>,
     blocks: Vec<BlockData>,
     insts: Vec<InstEntry>,
     values: Vec<ValueEntry>,
@@ -69,6 +70,7 @@ impl Function {
             name: name.into(),
             signature,
             callees: Vec::new(),
+            stack_slots: Vec::new(),
             blocks: Vec::new(),
             insts: Vec::new(),
             values: Vec::new(),
@@ -112,14 +114,30 @@ impl Function {
         FuncRef::from_index(self.callees.len() - 1)
     }
 
-    /// appends an instruction that yields a value; calls go through [`Function::push_call`]
+    /// `size` is in bytes; every slot is 8-byte aligned
+    pub fn create_stack_slot(&mut self, size: u32) -> StackSlot {
+        self.stack_slots.push(size);
+        StackSlot::from_index(self.stack_slots.len() - 1)
+    }
+
+    /// appends an instruction that yields a value; calls and stores go through
+    /// [`Function::push_call`] and [`Function::push_store`]
     pub fn push_inst(&mut self, block: Block, data: InstData) -> Value {
         assert!(
-            !matches!(data, InstData::Call { .. }),
-            "calls may not yield a value; use push_call"
+            !matches!(data, InstData::Call { .. } | InstData::Store { .. }),
+            "calls and stores may not yield a value"
         );
         self.insert_inst(block, data)
-            .expect("non-call instructions yield a value")
+            .expect("only calls and stores are void")
+    }
+
+    pub fn push_store(&mut self, block: Block, value: Value, addr: Value) {
+        self.insert_inst(
+            block,
+            InstData::Store {
+                args: [value, addr],
+            },
+        );
     }
 
     pub fn push_call(&mut self, block: Block, callee: FuncRef, args: Vec<Value>) -> Option<Value> {
@@ -185,6 +203,14 @@ impl Function {
 
     pub fn callee(&self, callee: FuncRef) -> &Callee {
         &self.callees[callee.index()]
+    }
+
+    pub fn stack_slots(&self) -> &[u32] {
+        &self.stack_slots
+    }
+
+    pub fn contains_stack_slot(&self, slot: StackSlot) -> bool {
+        slot.index() < self.stack_slots.len()
     }
 
     pub fn contains_callee(&self, callee: FuncRef) -> bool {

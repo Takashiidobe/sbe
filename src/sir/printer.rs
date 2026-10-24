@@ -1,6 +1,8 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use super::{Block, FuncRef, Function, Import, InstData, Module, Signature, Terminator, Value};
+use super::{
+    Block, FuncRef, Function, Import, InstData, Module, Signature, StackSlot, Terminator, Value,
+};
 
 fn write_values(f: &mut Formatter<'_>, values: &[Value]) -> fmt::Result {
     for (i, value) in values.iter().enumerate() {
@@ -49,12 +51,15 @@ impl Display for Function {
         write_signature(f, self.name(), self.signature())?;
         f.write_str(" {\n")?;
 
+        for (i, size) in self.stack_slots().iter().enumerate() {
+            writeln!(f, "    {} = stack_slot {size}", StackSlot::from_index(i))?;
+        }
         for (i, callee) in self.callees().iter().enumerate() {
             write!(f, "    {} = ", FuncRef::from_index(i))?;
             write_signature(f, &callee.name, &callee.signature)?;
             f.write_char('\n')?;
         }
-        if !self.callees().is_empty() {
+        if !self.callees().is_empty() || !self.stack_slots().is_empty() {
             f.write_char('\n')?;
         }
 
@@ -94,6 +99,11 @@ impl Display for Function {
                     InstData::Binary { op, args: [a, b] } => {
                         writeln!(f, "{} {a}, {b}", op.mnemonic())?
                     }
+                    InstData::Load { ty, addr } => writeln!(f, "load {ty} {addr}")?,
+                    InstData::Store {
+                        args: [value, addr],
+                    } => writeln!(f, "store {value}, {addr}")?,
+                    InstData::StackAddr { slot } => writeln!(f, "stack_addr {slot}")?,
                     InstData::Call { callee, args } => {
                         write!(f, "call {callee}(")?;
                         write_values(f, args)?;

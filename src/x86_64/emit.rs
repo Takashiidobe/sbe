@@ -2,10 +2,11 @@ use std::collections::BTreeSet;
 
 use iced_x86::BlockEncoderOptions;
 use iced_x86::code_asm::{
-    AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, CodeAssembler, al, ax, bl, bx, cl,
-    cx, di, dil, dl, dx, eax, ebx, ecx, edi, edx, esi, r8, r8b, r8d, r8w, r9, r9b, r9d, r9w, r10,
-    r10b, r10d, r10w, r11, r11b, r11d, r11w, r12, r12b, r12d, r12w, r13, r13b, r13d, r13w, r14,
-    r14b, r14d, r14w, r15, r15b, r15d, r15w, rax, rbx, rcx, rdi, rdx, rsi, rsp, si, sil,
+    AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, CodeAssembler, al, ax, bl, bx,
+    byte_ptr, cl, cx, di, dil, dl, dword_ptr, dx, eax, ebx, ecx, edi, edx, esi, ptr, qword_ptr, r8,
+    r8b, r8d, r8w, r9, r9b, r9d, r9w, r10, r10b, r10d, r10w, r11, r11b, r11d, r11w, r12, r12b,
+    r12d, r12w, r13, r13b, r13d, r13w, r14, r14b, r14d, r14w, r15, r15b, r15d, r15w, rax, rbx, rcx,
+    rdi, rdx, rsi, rsp, si, sil, word_ptr,
 };
 use iced_x86::{Formatter, IntelFormatter};
 
@@ -229,6 +230,25 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
                     calls.push((site, symbol.clone()));
                     a.call(CALL_PLACEHOLDER)
                 }
+                Inst::Load { bits, dst, addr } => {
+                    let mem = ptr(asm_reg(addr));
+                    match bits {
+                        8 => a.movzx(asm_reg(dst), byte_ptr(asm_reg(addr))),
+                        16 => a.movzx(asm_reg(dst), word_ptr(asm_reg(addr))),
+                        32 => a.mov(asm_reg32(dst), dword_ptr(asm_reg(addr))),
+                        _ => a.mov(asm_reg(dst), mem),
+                    }
+                }
+                Inst::Store { bits, addr, src } => {
+                    let addr = asm_reg(addr);
+                    match bits {
+                        8 => a.mov(byte_ptr(addr), asm_reg8(src)),
+                        16 => a.mov(word_ptr(addr), asm_reg16(src)),
+                        32 => a.mov(dword_ptr(addr), asm_reg32(src)),
+                        _ => a.mov(qword_ptr(addr), asm_reg(src)),
+                    }
+                }
+                Inst::StackAddr { dst, offset } => a.lea(asm_reg(dst), ptr(rsp + offset)),
                 Inst::Push { reg } => a.push(asm_reg(reg)),
                 Inst::Pop { reg } => a.pop(asm_reg(reg)),
                 Inst::AdjustSp { bytes } if bytes >= 0 => a.sub(rsp, bytes),

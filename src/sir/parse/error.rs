@@ -39,6 +39,12 @@ pub enum ParseErrorKind {
     #[error("function `{0}` is not declared")]
     UndefinedCallee(String),
 
+    #[error("stack slot `{0}` is declared more than once")]
+    DuplicateStackSlot(String),
+
+    #[error("stack slot `{0}` is not declared")]
+    UndefinedStackSlot(String),
+
     #[error("call to `{0}` {1}")]
     CallResult(String, &'static str),
 

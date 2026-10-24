@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use wasm_encoder::{
-    BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function as WasmFunction,
-    FunctionSection, ImportSection, IndirectNameMap, Instruction, Module as WasmModule, NameMap,
+    BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection,
+    Function as WasmFunction, FunctionSection, GlobalSection, GlobalType, ImportSection,
+    IndirectNameMap, Instruction, MemArg, MemorySection, MemoryType, Module as WasmModule, NameMap,
     NameSection, TypeSection, ValType,
 };
 
@@ -11,6 +12,11 @@ use crate::sir::{
     BinOp, Block, ControlFlow, CvtOp, Function, InstData, IntCC, Module, Signature, Terminator,
     Type, UnOp, Value, ValueDef, verify_module,
 };
+
+/// linear memory is one page; the shadow stack grows down from its end, and its pointer is the
+/// module's only global
+const MEMORY_BYTES: i32 = 65536;
+const STACK_POINTER: u32 = 0;
 
 pub struct Compiled {
     pub code: Vec<u8>,
@@ -30,12 +36,53 @@ struct Emitter<'a> {
     dom_children: Vec<Vec<Block>>,
     local_of: Vec<u32>,
     callee_index: Vec<u32>,
+    /// local holding the base of this function's stack slots, and the frame's size in bytes
+    frame_local: u32,
+    slot_offsets: Vec<u32>,
+    frame_size: u32,
     body: WasmFunction,
 }
 
 impl Emitter<'_> {
     fn op(&mut self, instruction: Instruction<'_>) {
         self.body.instruction(&instruction);
+    }
+
+    fn mem_arg() -> MemArg {
+        MemArg {
+            offset: 0,
+            align: 0,
+            memory_index: 0,
+        }
+    }
+
+    fn emit_load(&mut self, ty: Type, addr: Value) {
+        self.get(addr);
+        self.op(Instruction::I32WrapI64);
+        self.op(match ty {
+            Type::I8 => Instruction::I32Load8U(Self::mem_arg()),
+            Type::I16 => Instruction::I32Load16U(Self::mem_arg()),
+            Type::I32 => Instruction::I32Load(Self::mem_arg()),
+            Type::I64 => Instruction::I64Load(Self::mem_arg()),
+        });
+    }
+
+    fn emit_store(&mut self, value: Value, addr: Value) {
+        self.get(addr);
+        self.op(Instruction::I32WrapI64);
+        self.get(value);
+        self.op(match self.ty(value) {
+            Type::I8 => Instruction::I32Store8(Self::mem_arg()),
+            Type::I16 => Instruction::I32Store16(Self::mem_arg()),
+            Type::I32 => Instruction::I32Store(Self::mem_arg()),
+            Type::I64 => Instruction::I64Store(Self::mem_arg()),
+        });
+    }
+
+    fn set_stack_pointer(&mut self, delta: i32) {
+        self.op(Instruction::GlobalGet(STACK_POINTER));
+        self.op(Instruction::I32Const(delta));
+        self.op(Instruction::I32Add);
     }
 
     fn get(&mut self, value: Value) {
@@ -247,6 +294,18 @@ impl Emitter<'_> {
                 InstData::Binary { op, args: [a, b] } => {
                     self.emit_binary(*op, self.ty(*a), *a, *b);
                 }
+                InstData::Load { ty, addr } => self.emit_load(*ty, *addr),
+                InstData::Store {
+                    args: [value, addr],
+                } => self.emit_store(*value, *addr),
+                InstData::StackAddr { slot } => {
+                    self.op(Instruction::LocalGet(self.frame_local));
+                    self.op(Instruction::I32Const(
+                        self.slot_offsets[slot.index()] as i32,
+                    ));
+                    self.op(Instruction::I32Add);
+                    self.op(Instruction::I64ExtendI32U);
+                }
                 InstData::Call { callee, args } => {
                     for &arg in args {
                         self.get(arg);
@@ -261,6 +320,12 @@ impl Emitter<'_> {
     }
 
     fn emit_return(&mut self, values: &[Value]) {
+        if self.frame_size > 0 {
+            self.op(Instruction::LocalGet(self.frame_local));
+            self.op(Instruction::I32Const(self.frame_size as i32));
+            self.op(Instruction::I32Add);
+            self.op(Instruction::GlobalSet(STACK_POINTER));
+        }
         for &value in values {
             self.get(value);
         }
@@ -465,6 +530,16 @@ fn compile_body(
     if !reducible {
         locals.push((1, ValType::I32));
     }
+    let mut slot_offsets = Vec::new();
+    let mut frame_size = 0u32;
+    for &size in func.stack_slots() {
+        slot_offsets.push(frame_size);
+        frame_size += size.next_multiple_of(8);
+    }
+    let frame_local = local_values.len() as u32 + u32::from(!reducible);
+    if frame_size > 0 {
+        locals.push((1, ValType::I32));
+    }
     let mut emitter = Emitter {
         func,
         cfg,
@@ -475,8 +550,16 @@ fn compile_body(
             .iter()
             .map(|callee| function_index[callee.name.as_str()])
             .collect(),
+        frame_local,
+        slot_offsets,
+        frame_size,
         body: WasmFunction::new(locals),
     };
+    if frame_size > 0 {
+        emitter.set_stack_pointer(-(frame_size as i32));
+        emitter.op(Instruction::LocalTee(frame_local));
+        emitter.op(Instruction::GlobalSet(STACK_POINTER));
+    }
     if reducible {
         emitter.do_tree(func.entry_block(), &mut Vec::new());
     } else {
@@ -523,6 +606,18 @@ pub fn compile_module(module: &Module) -> Result<Compiled, CompileError> {
     let mut function_names = NameMap::new();
     let mut all_local_names = IndirectNameMap::new();
 
+    let needs_memory = module.functions().iter().any(|func| {
+        !func.stack_slots().is_empty()
+            || func.blocks().any(|block| {
+                func.block(block).insts().iter().any(|&inst| {
+                    matches!(
+                        func.inst(inst),
+                        InstData::Load { .. } | InstData::Store { .. }
+                    )
+                })
+            })
+    });
+
     let mut next_type = 0;
     let mut add_type = |signature: &Signature| {
         types.ty().function(
@@ -562,10 +657,30 @@ pub fn compile_module(module: &Module) -> Result<Compiled, CompileError> {
     if !module.imports().is_empty() {
         wasm.section(&imports);
     }
-    wasm.section(&functions)
-        .section(&exports)
-        .section(&code)
-        .section(&names);
+    wasm.section(&functions);
+    if needs_memory {
+        let mut memories = MemorySection::new();
+        memories.memory(MemoryType {
+            minimum: 1,
+            maximum: Some(1),
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+        wasm.section(&memories);
+        let mut globals = GlobalSection::new();
+        globals.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::i32_const(MEMORY_BYTES),
+        );
+        wasm.section(&globals);
+        exports.export("memory", ExportKind::Memory, 0);
+    }
+    wasm.section(&exports).section(&code).section(&names);
     let bytes = wasm.finish();
 
     let wat = wasmprinter::print_bytes(&bytes).map_err(|e| CompileError::Print(e.to_string()))?;

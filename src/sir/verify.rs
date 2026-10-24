@@ -4,7 +4,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    Block, ControlFlow, FuncRef, Function, Inst, InstData, Terminator, Type, Value, ValueDef,
+    Block, ControlFlow, FuncRef, Function, Inst, InstData, StackSlot, Terminator, Type, Value,
+    ValueDef,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,6 +78,14 @@ pub enum VerifyError {
     )]
     CallReturns { user: Use, callee: FuncRef },
 
+    #[error("{user} uses {slot}, which is not declared in this function")]
+    #[diagnostic(code(sir::verify::unknown_stack_slot))]
+    UnknownStackSlot { user: Use, slot: StackSlot },
+
+    #[error("{0} is empty")]
+    #[diagnostic(code(sir::verify::empty_stack_slot))]
+    EmptyStackSlot(StackSlot),
+
     #[error("{0} returns the wrong number of values for the signature")]
     #[diagnostic(code(sir::verify::return_arity))]
     ReturnArity(Block),
@@ -145,6 +154,12 @@ impl Verifier<'_> {
 
     fn check_structure(&mut self) {
         let func = self.func;
+        for (i, &size) in func.stack_slots().iter().enumerate() {
+            if size == 0 {
+                self.errors
+                    .push(VerifyError::EmptyStackSlot(StackSlot::from_index(i)));
+            }
+        }
         for block in func.blocks() {
             let data = func.block(block);
             for &inst in data.insts() {
@@ -207,6 +222,19 @@ impl Verifier<'_> {
                 self.check_same_type(user, *then_value, *else_value);
             }
             InstData::Call { callee, args } => self.check_call(user, *callee, args),
+            InstData::Load { addr, .. } => self.check_arg(user, *addr, Type::I64),
+            InstData::Store {
+                args: [value, addr],
+            } => {
+                self.check_arg(user, *addr, Type::I64);
+                self.check_same_type(user, *value, *value);
+            }
+            InstData::StackAddr { slot } => {
+                if !self.func.contains_stack_slot(*slot) {
+                    self.errors
+                        .push(VerifyError::UnknownStackSlot { user, slot: *slot });
+                }
+            }
         }
     }
 

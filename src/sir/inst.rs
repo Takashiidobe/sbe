@@ -1,4 +1,4 @@
-use super::{Block, FuncRef, Type, Value};
+use super::{Block, FuncRef, StackSlot, Type, Value};
 
 /// binary ops take two operands of one integer type and yield that type. shift amounts are taken
 /// modulo the type's width. `sdiv`, `udiv`, `srem` and `urem` trap on a zero divisor. the signed
@@ -196,10 +196,24 @@ pub enum InstData {
         callee: FuncRef,
         args: Vec<Value>,
     },
+    /// reads a `ty` from the `i64` address `addr`; narrow results have undefined upper bits like
+    /// any other narrow value
+    Load {
+        ty: Type,
+        addr: Value,
+    },
+    /// writes `args[0]` to the `i64` address `args[1]`; yields nothing
+    Store {
+        args: [Value; 2],
+    },
+    /// the `i64` address of a stack slot, valid until the function returns
+    StackAddr {
+        slot: StackSlot,
+    },
 }
 
 impl InstData {
-    /// `None` for a call to a callee that returns nothing
+    /// `None` for a store and for a call to a callee that returns nothing
     pub fn result_type(
         &self,
         type_of: impl Fn(Value) -> Type,
@@ -214,12 +228,17 @@ impl InstData {
                 args: [_, then_value, _],
             } => type_of(*then_value),
             InstData::Call { callee, .. } => return callee_return(*callee),
+            InstData::Load { ty, .. } => *ty,
+            InstData::Store { .. } => return None,
+            InstData::StackAddr { .. } => Type::I64,
         })
     }
 
     pub fn args(&self) -> &[Value] {
         match self {
-            InstData::Iconst { .. } => &[],
+            InstData::Iconst { .. } | InstData::StackAddr { .. } => &[],
+            InstData::Load { addr, .. } => std::slice::from_ref(addr),
+            InstData::Store { args } => args,
             InstData::Unary { arg, .. } | InstData::Convert { arg, .. } => {
                 std::slice::from_ref(arg)
             }

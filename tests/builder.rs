@@ -105,6 +105,45 @@ fn finish_rejects_unterminated_blocks() {
 }
 
 #[test]
+fn builds_loads_stores_and_stack_slots() {
+    let mut builder = FunctionBuilder::new("f", i64_sig(1, 1));
+    let slot = builder.create_stack_slot(8);
+    let entry = builder.entry_block();
+    builder.switch_to_block(entry).unwrap();
+
+    let x = builder.block_params(entry).unwrap()[0];
+    let addr = builder.stack_addr(slot).unwrap();
+    builder.store(x, addr).unwrap();
+    let loaded = builder.load(Type::I64, addr).unwrap();
+    builder.ret(loaded).unwrap();
+
+    let func = builder.finish().unwrap();
+    assert_eq!(
+        func.to_string(),
+        "function %f(i64) -> i64 {\n    \
+         ss0 = stack_slot 8\n\n\
+         block0(v0: i64):\n    \
+         v1 = stack_addr ss0\n    \
+         store v0, v1\n    \
+         v2 = load i64 v1\n    \
+         return v2\n}\n"
+    );
+}
+
+#[test]
+fn rejects_unknown_stack_slot() {
+    let mut other = FunctionBuilder::new("g", i64_sig(0, 0));
+    let slot = other.create_stack_slot(8);
+    let mut builder = FunctionBuilder::new("f", i64_sig(0, 0));
+    let entry = builder.entry_block();
+    builder.switch_to_block(entry).unwrap();
+    assert_eq!(
+        builder.stack_addr(slot),
+        Err(BuilderError::UnknownStackSlot(slot))
+    );
+}
+
+#[test]
 fn builds_calls_to_declared_callees() {
     let mut builder = FunctionBuilder::new("f", i64_sig(1, 1));
     let double = builder.declare_callee("double", i64_sig(1, 1));

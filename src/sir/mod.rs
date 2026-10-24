@@ -11,7 +11,7 @@ mod verify;
 
 pub use builder::{BuilderError, FunctionBuilder};
 pub use cfg::ControlFlow;
-pub use entities::{Block, FuncRef, Inst, Value};
+pub use entities::{Block, FuncRef, Inst, StackSlot, Value};
 pub use function::{BlockData, Callee, Function, Signature, ValueDef};
 pub use inst::{BinOp, CvtOp, InstData, IntCC, Terminator, UnOp};
 pub use module::{Import, Module, ModuleError, ModuleErrors, verify_module};

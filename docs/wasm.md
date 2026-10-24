@@ -9,6 +9,16 @@ value gets its own wasm local; params are the first locals.
 module name `env`, then the defined functions, each exported by name. `compile`
 on a single function that calls others imports every distinct callee.
 
+## Memory
+
+Any module that loads, stores or has a stack slot gets one 64 KiB memory,
+exported as `memory`, and a mutable `i32` global holding the shadow stack
+pointer, which starts at the end of memory and grows down. A function with
+slots subtracts its frame size in the prologue and adds it back before each
+return. Addresses are `i64` in sir and wrapped to `i32` for the access, so only
+the low 4 GiB can be named; `stack_addr` zero-extends. Accesses are unaligned
+and nothing is bounds-checked beyond wasm's own trap.
+
 ## Control flow
 
 Reducible functions use structured control flow built from the dominator tree

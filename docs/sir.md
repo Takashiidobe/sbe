@@ -26,6 +26,12 @@ Types are `i8`, `i16`, `i32` and `i64`. Instructions:
 - `call fnN(args)`: `fnN` is declared at the top of the function with
   `fnN = %name(types) -> type`. The call yields a value (`v1 = call fn0(v0)`)
   only when the callee returns one. Callees return at most one value.
+- `load <ty> addr` reads memory; `store v, addr` writes it and yields nothing.
+  Addresses are plain `i64` values: there is no pointer type, and the 64-bit
+  width is fixed on every target.
+- `stack_addr ssN` is the address of a stack slot declared at the top of the
+  function with `ssN = stack_slot <bytes>`. Slots are 8-byte aligned and live
+  until the function returns.
 
 Terminators are `return`, `jump`, and `brif`. `brif` needs an `i8` condition.
 Function params cannot be `i8`.

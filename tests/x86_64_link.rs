@@ -1,5 +1,7 @@
 #![cfg(all(target_arch = "x86_64", target_os = "linux"))]
 
+mod common;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -115,4 +117,51 @@ int main(void) {
         .arg(&main_path)
         .arg(&object_path));
     assert_eq!(stdout_of(&exe_path), "note 6\n3628800 723 22\n17\n");
+}
+
+#[test]
+fn module_memory_against_c_harness() {
+    let module = parse_module("memory", include_str!("programs/memory.sir")).unwrap();
+    let object = module_object(&compile_module(&module).unwrap()).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let object_path = dir.path().join("module.o");
+    let main_path = dir.path().join("main.c");
+    let exe_path = dir.path().join("prog");
+    std::fs::write(&object_path, object).unwrap();
+    std::fs::write(
+        &main_path,
+        r#"#include <stdint.h>
+#include <stdio.h>
+extern long triple(long);
+extern long widths(long);
+extern long squares(long);
+extern long rec(long);
+extern long read_i32s(const int32_t *);
+extern void write_byte(unsigned char *, int);
+int main(void) {
+    printf("%ld %ld\n", triple(7), widths(0x1122334455667788L));
+    printf("%ld %ld\n", squares(8), rec(100));
+    int32_t pair[2] = {1, -2};
+    unsigned char byte = 0;
+    write_byte(&byte, 0x1ff);
+    printf("%ld %d\n", read_i32s(pair), byte);
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    run(Command::new("cc")
+        .args(["-O0", "-fno-omit-frame-pointer", "-o"])
+        .arg(&exe_path)
+        .arg(&main_path)
+        .arg(&object_path));
+    let expected = format!(
+        "{} {}\n{} {}\n-1 255\n",
+        common::memory_triple(7),
+        common::memory_widths(0x1122334455667788),
+        common::memory_squares(8),
+        common::memory_rec(100),
+    );
+    assert_eq!(stdout_of(&exe_path), expected);
 }

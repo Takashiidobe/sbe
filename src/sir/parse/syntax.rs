@@ -1,5 +1,6 @@
 use super::ast::{
-    BlockAst, CalleeAst, FunctionAst, ImportAst, InstAst, Item, Name, Op, Param, TargetAst, TermAst,
+    BlockAst, CalleeAst, FunctionAst, ImportAst, InstAst, Item, Name, Op, Param, StackSlotAst,
+    TargetAst, TermAst,
 };
 use super::error::{Failure, PResult, ParseErrorKind};
 use super::lexer::{Token, TokenKind};
@@ -29,11 +30,17 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::LBrace)?;
         let mut callees = Vec::new();
-        while self.peek().kind == TokenKind::Ident
-            && self.peek_at(1).kind == TokenKind::Equals
-            && self.peek_at(2).kind == TokenKind::FuncName
-        {
-            callees.push(self.callee()?);
+        let mut stack_slots = Vec::new();
+        while self.peek().kind == TokenKind::Ident && self.peek_at(1).kind == TokenKind::Equals {
+            if self.peek_at(2).kind == TokenKind::FuncName {
+                callees.push(self.callee()?);
+            } else if self.peek_at(2).kind == TokenKind::Ident
+                && self.peek_at(2).text(self.src) == "stack_slot"
+            {
+                stack_slots.push(self.stack_slot()?);
+            } else {
+                break;
+            }
         }
         let mut blocks = Vec::new();
         while !matches!(self.peek().kind, TokenKind::RBrace | TokenKind::Eof) {
@@ -43,6 +50,7 @@ impl<'a> Parser<'a> {
 
         Ok(FunctionAst {
             name,
+            stack_slots,
             callees,
             params,
             returns,
@@ -93,6 +101,18 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
         Ok((&name_tok.text(self.src)[1..], params, returns))
+    }
+
+    fn stack_slot(&mut self) -> PResult<StackSlotAst<'a>> {
+        let alias = self.name()?;
+        self.expect(TokenKind::Equals)?;
+        self.advance();
+        let tok = self.expect(TokenKind::Int)?;
+        let size = tok.text(self.src).parse().map_err(|_| Failure {
+            kind: ParseErrorKind::InvalidInteger(tok.text(self.src).to_owned()),
+            span: tok.span(),
+        })?;
+        Ok(StackSlotAst { alias, size })
     }
 
     fn callee(&mut self) -> PResult<CalleeAst<'a>> {
@@ -186,6 +206,15 @@ impl<'a> Parser<'a> {
                         op: Op::Call(callee, args),
                     });
                 }
+                "store" if self.peek_at(1).kind != TokenKind::Equals => {
+                    self.advance();
+                    let value = self.name()?;
+                    self.expect(TokenKind::Comma)?;
+                    insts.push(InstAst {
+                        result: None,
+                        op: Op::Store(value, self.name()?),
+                    });
+                }
                 _ if self.peek_at(1).kind == TokenKind::Equals => insts.push(self.inst()?),
                 _ => break,
             }
@@ -241,6 +270,11 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::Comma)?;
                 Op::Icmp(cc, a, self.name()?)
             }
+            "load" => {
+                let ty = self.ty()?;
+                Op::Load(ty, self.name()?)
+            }
+            "stack_addr" => Op::StackAddr(self.name()?),
             "call" => {
                 let (callee, args) = self.call_target()?;
                 Op::Call(callee, args)

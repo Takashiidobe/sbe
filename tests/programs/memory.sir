@@ -1,0 +1,119 @@
+function %triple(i64) -> i64 {
+    ss0 = stack_slot 16
+
+block0(v0: i64):
+    v1 = stack_addr ss0
+    v2 = iconst i64 8
+    v3 = iadd v1, v2
+    v4 = iconst i64 2
+    v5 = imul v0, v4
+    store v0, v1
+    store v5, v3
+    v6 = load i64 v1
+    v7 = load i64 v3
+    v8 = iadd v6, v7
+    return v8
+}
+
+function %widths(i64) -> i64 {
+    ss0 = stack_slot 8
+
+block0(v0: i64):
+    v1 = stack_addr ss0
+    store v0, v1
+    v2 = load i8 v1
+    v3 = load i16 v1
+    v4 = load i32 v1
+    v5 = uextend i64 v2
+    v6 = uextend i64 v3
+    v7 = uextend i64 v4
+    v8 = iadd v5, v6
+    v9 = iadd v8, v7
+    return v9
+}
+
+function %squares(i64) -> i64 {
+    ss0 = stack_slot 64
+
+block0(v0: i64):
+    v1 = stack_addr ss0
+    v2 = iconst i64 0
+    jump block1(v2)
+
+block1(v3: i64):
+    v4 = icmp slt v3, v0
+    brif v4, block2, block3
+
+block2:
+    v5 = iconst i64 3
+    v6 = ishl v3, v5
+    v7 = iadd v1, v6
+    v8 = imul v3, v3
+    store v8, v7
+    v9 = iconst i64 1
+    v10 = iadd v3, v9
+    jump block1(v10)
+
+block3:
+    v11 = iconst i64 0
+    jump block4(v11, v11)
+
+block4(v12: i64, v13: i64):
+    v14 = icmp slt v12, v0
+    brif v14, block5, block6
+
+block5:
+    v15 = iconst i64 3
+    v16 = ishl v12, v15
+    v17 = iadd v1, v16
+    v18 = load i64 v17
+    v19 = iadd v13, v18
+    v20 = iconst i64 1
+    v21 = iadd v12, v20
+    jump block4(v21, v19)
+
+block6:
+    return v13
+}
+
+function %rec(i64) -> i64 {
+    fn0 = %rec(i64) -> i64
+    ss0 = stack_slot 8
+
+block0(v0: i64):
+    v1 = iconst i64 0
+    v2 = icmp sle v0, v1
+    brif v2, block1, block2
+
+block1:
+    return v1
+
+block2:
+    v3 = stack_addr ss0
+    store v0, v3
+    v4 = iconst i64 1
+    v5 = isub v0, v4
+    v6 = call fn0(v5)
+    v7 = load i64 v3
+    v8 = iadd v6, v7
+    return v8
+}
+
+function %read_i32s(i64) -> i64 {
+block0(v0: i64):
+    v1 = load i32 v0
+    v2 = iconst i64 4
+    v3 = iadd v0, v2
+    v4 = load i32 v3
+    v5 = sextend i64 v1
+    v6 = sextend i64 v4
+    v7 = iadd v5, v6
+    return v7
+}
+
+function %write_byte(i64, i32) {
+block0(v0: i64, v1: i32):
+    v2 = ireduce i8 v1
+    store v2, v0
+    return
+}

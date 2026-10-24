@@ -2,8 +2,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    BinOp, Block, CvtOp, FuncRef, Function, InstData, IntCC, Signature, Terminator, Type, UnOp,
-    Value, VerifyErrors, verify::verify,
+    BinOp, Block, CvtOp, FuncRef, Function, InstData, IntCC, Signature, StackSlot, Terminator,
+    Type, UnOp, Value, VerifyErrors, verify::verify,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Diagnostic)]
@@ -26,6 +26,10 @@ pub enum BuilderError {
     #[error("{0} is not declared in this function")]
     #[diagnostic(code(sir::builder::unknown_callee))]
     UnknownCallee(FuncRef),
+
+    #[error("{0} is not a stack slot of this function")]
+    #[diagnostic(code(sir::builder::unknown_stack_slot))]
+    UnknownStackSlot(StackSlot),
 
     #[error("{0} is already terminated")]
     #[diagnostic(code(sir::builder::block_terminated))]
@@ -51,6 +55,10 @@ impl FunctionBuilder {
 
     pub fn declare_callee(&mut self, name: impl Into<String>, signature: Signature) -> FuncRef {
         self.func.declare_callee(name, signature)
+    }
+
+    pub fn create_stack_slot(&mut self, size: u32) -> StackSlot {
+        self.func.create_stack_slot(size)
     }
 
     pub fn create_block(&mut self) -> Block {
@@ -125,6 +133,26 @@ impl FunctionBuilder {
         args.iter().try_for_each(|&v| self.check_value(v))?;
         let block = self.open_block()?;
         Ok(self.func.push_call(block, callee, args.to_vec()))
+    }
+
+    pub fn load(&mut self, ty: Type, addr: Value) -> Result<Value, BuilderError> {
+        self.check_value(addr)?;
+        self.emit(InstData::Load { ty, addr })
+    }
+
+    pub fn store(&mut self, value: Value, addr: Value) -> Result<(), BuilderError> {
+        self.check_value(value)?;
+        self.check_value(addr)?;
+        let block = self.open_block()?;
+        self.func.push_store(block, value, addr);
+        Ok(())
+    }
+
+    pub fn stack_addr(&mut self, slot: StackSlot) -> Result<Value, BuilderError> {
+        if !self.func.contains_stack_slot(slot) {
+            return Err(BuilderError::UnknownStackSlot(slot));
+        }
+        self.emit(InstData::StackAddr { slot })
     }
 
     pub fn iadd(&mut self, a: Value, b: Value) -> Result<Value, BuilderError> {

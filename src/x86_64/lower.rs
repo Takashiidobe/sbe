@@ -142,6 +142,12 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
     let layout = Layout::new(func, order);
     let mut next_vreg = func.num_values();
     let mut blocks = Vec::new();
+    let mut slot_offsets = Vec::new();
+    let mut stack_size = 0u32;
+    for &size in func.stack_slots() {
+        slot_offsets.push(stack_size);
+        stack_size += size.next_multiple_of(8);
+    }
 
     for &block in order {
         let data = func.block(block);
@@ -162,7 +168,21 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                 lower_call(&mut insts, symbol, args, func.inst_result(inst))?;
                 continue;
             }
-            let result = vreg(func.inst_result(inst).expect("only calls are void"));
+            if let InstData::Store {
+                args: [value, addr],
+            } = func.inst(inst)
+            {
+                insts.push(Inst::Store {
+                    bits: func.value_type(*value).bits() as u8,
+                    addr: vreg(*addr),
+                    src: vreg(*value),
+                });
+                continue;
+            }
+            let result = vreg(
+                func.inst_result(inst)
+                    .expect("only calls and stores are void"),
+            );
             match func.inst(inst) {
                 InstData::Iconst { value, .. } => insts.push(Inst::MovImm {
                     dst: result,
@@ -219,7 +239,16 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                         src: vreg(*arg),
                     }),
                 },
-                InstData::Call { .. } => unreachable!("lowered above"),
+                InstData::Load { ty, addr } => insts.push(Inst::Load {
+                    bits: ty.bits() as u8,
+                    dst: result,
+                    addr: vreg(*addr),
+                }),
+                InstData::StackAddr { slot } => insts.push(Inst::StackAddr {
+                    dst: result,
+                    offset: slot_offsets[slot.index()],
+                }),
+                InstData::Call { .. } | InstData::Store { .. } => unreachable!("lowered above"),
                 InstData::Binary { op, args: [a, b] } => {
                     let ty = func.value_type(*a);
                     let signed = matches!(op, BinOp::Sshr | BinOp::Sdiv | BinOp::Srem);
@@ -312,6 +341,7 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
     Ok(VCode {
         name: func.name().to_owned(),
         blocks,
+        stack_size,
     })
 }
 
