@@ -111,6 +111,17 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
         for inst in &block.insts {
             let data = match &inst.op {
                 Op::Iconst(value) => InstData::Iconst { value: *value },
+                Op::Icmp(cc, a, b) => InstData::Icmp {
+                    cc: *cc,
+                    args: [names.value(*a)?, names.value(*b)?],
+                },
+                Op::Select(cond, then_value, else_value) => InstData::Select {
+                    args: [
+                        names.value(*cond)?,
+                        names.value(*then_value)?,
+                        names.value(*else_value)?,
+                    ],
+                },
                 Op::Unary(op, arg) => InstData::Unary {
                     op: *op,
                     arg: names.value(*arg)?,

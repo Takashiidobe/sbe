@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use super::error::CompileError;
-use super::vcode::{AluOp, Inst, Label, PReg, Reg, ShiftOp, UnaryOp, VBlock, VCode, VReg};
-use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, Terminator, UnOp, Value};
+use super::vcode::{AluOp, Cc, Inst, Label, PReg, Reg, ShiftOp, UnaryOp, VBlock, VCode, VReg};
+use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, IntCC, Terminator, UnOp, Value};
 
 fn vreg(value: Value) -> Reg {
     Reg::V(VReg::from_index(value.index()))
@@ -115,6 +115,31 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                     dst: result,
                     imm: *value,
                 }),
+                InstData::Icmp { cc, args: [a, b] } => {
+                    insts.push(Inst::Cmp {
+                        a: vreg(*a),
+                        b: vreg(*b),
+                    });
+                    insts.push(Inst::Setcc {
+                        cc: condition(*cc),
+                        dst: result,
+                    });
+                    insts.push(Inst::Movzx8 { dst: result });
+                }
+                InstData::Select {
+                    args: [cond, then_value, else_value],
+                } => {
+                    insts.push(Inst::Mov {
+                        dst: result,
+                        src: vreg(*else_value),
+                    });
+                    insts.push(Inst::Test { reg: vreg(*cond) });
+                    insts.push(Inst::Cmov {
+                        cc: Cc::Ne,
+                        dst: result,
+                        src: vreg(*then_value),
+                    });
+                }
                 InstData::Unary { op, arg } => {
                     insts.push(Inst::Mov {
                         dst: result,
@@ -262,5 +287,20 @@ fn lower_binary(insts: &mut Vec<Inst<Reg>>, op: BinOp, result: Reg, a: Reg, b: R
         BinOp::Udiv => divide(insts, false, true),
         BinOp::Srem => divide(insts, true, false),
         BinOp::Urem => divide(insts, false, false),
+    }
+}
+
+fn condition(cc: IntCC) -> Cc {
+    match cc {
+        IntCC::Eq => Cc::E,
+        IntCC::Ne => Cc::Ne,
+        IntCC::Slt => Cc::L,
+        IntCC::Sle => Cc::Le,
+        IntCC::Sgt => Cc::G,
+        IntCC::Sge => Cc::Ge,
+        IntCC::Ult => Cc::B,
+        IntCC::Ule => Cc::Be,
+        IntCC::Ugt => Cc::A,
+        IntCC::Uge => Cc::Ae,
     }
 }

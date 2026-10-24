@@ -1,7 +1,7 @@
 use super::ast::{BlockAst, FunctionAst, InstAst, Name, Op, Param, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
 use super::lexer::{Token, TokenKind};
-use crate::sir::{BinOp, Type, UnOp};
+use crate::sir::{BinOp, IntCC, Type, UnOp};
 
 pub(super) struct Parser<'a> {
     src: &'a str,
@@ -68,6 +68,7 @@ impl<'a> Parser<'a> {
     fn ty(&mut self) -> PResult<Type> {
         let tok = self.expect(TokenKind::Ident)?;
         match tok.text(self.src) {
+            "i8" => Ok(Type::I8),
             "i64" => Ok(Type::I64),
             other => Err(Failure {
                 kind: ParseErrorKind::UnknownType(other.to_owned()),
@@ -151,6 +152,25 @@ impl<'a> Parser<'a> {
                     span: tok.span(),
                 })?;
                 Op::Iconst(value)
+            }
+            "icmp" => {
+                let cc_tok = self.expect(TokenKind::Ident)?;
+                let Some(cc) = IntCC::from_mnemonic(cc_tok.text(self.src)) else {
+                    return Err(Failure {
+                        kind: ParseErrorKind::UnknownCondition(cc_tok.text(self.src).to_owned()),
+                        span: cc_tok.span(),
+                    });
+                };
+                let a = self.name()?;
+                self.expect(TokenKind::Comma)?;
+                Op::Icmp(cc, a, self.name()?)
+            }
+            "select" => {
+                let cond = self.name()?;
+                self.expect(TokenKind::Comma)?;
+                let then_value = self.name()?;
+                self.expect(TokenKind::Comma)?;
+                Op::Select(cond, then_value, self.name()?)
             }
             other => {
                 if let Some(op) = UnOp::from_mnemonic(other) {

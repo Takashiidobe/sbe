@@ -13,7 +13,9 @@ block1(v2: i64, v3: i64):
     v4 = iadd v3, v2
     v5 = iconst -1
     v6 = iadd v2, v5
-    brif v6, block1(v6, v4), block2(v4)
+    v100 = iconst 0
+    v101 = icmp ne v6, v100
+    brif v101, block1(v6, v4), block2(v4)
 
 block2(v7: i64):
     return v7

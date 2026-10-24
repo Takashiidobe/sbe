@@ -82,3 +82,34 @@ pub fn binop_text(op: &str) -> String {
 pub fn unop_text(op: &str) -> String {
     format!("function %f(i64) -> i64 {{\nblock0(v0: i64):\n    v1 = {op} v0\n    return v1\n}}\n")
 }
+
+pub const CONDITIONS: [&str; 10] = [
+    "eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge",
+];
+
+pub fn icmp_reference(cc: &str, a: i64, b: i64) -> bool {
+    let (ua, ub) = (a as u64, b as u64);
+    match cc {
+        "eq" => a == b,
+        "ne" => a != b,
+        "slt" => a < b,
+        "sle" => a <= b,
+        "sgt" => a > b,
+        "sge" => a >= b,
+        "ult" => ua < ub,
+        "ule" => ua <= ub,
+        "ugt" => ua > ub,
+        "uge" => ua >= ub,
+        _ => panic!("unknown condition {cc}"),
+    }
+}
+
+pub fn icmp_text(cc: &str) -> String {
+    format!(
+        "function %f(i64, i64) -> i8 {{\nblock0(v0: i64, v1: i64):\n    v2 = icmp {cc} v0, v1\n    return v2\n}}\n"
+    )
+}
+
+pub const MIN_BY_SELECT: &str = "function %f(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n    v2 = icmp slt v0, v1\n    v3 = select v2, v0, v1\n    return v3\n}\n";
+
+pub const I8_BLOCK_PARAM: &str = "function %f(i64, i64) -> i8 {\nblock0(v0: i64, v1: i64):\n    v2 = icmp ult v0, v1\n    jump block1(v2)\n\nblock1(v3: i8):\n    return v3\n}\n";

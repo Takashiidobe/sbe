@@ -1,6 +1,6 @@
 use miette::SourceSpan;
 
-use crate::sir::{BinOp, Type, UnOp};
+use crate::sir::{BinOp, IntCC, Type, UnOp};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Name<'a> {
@@ -16,6 +16,8 @@ pub(super) struct Param<'a> {
 pub(super) enum Op<'a> {
     Iconst(i64),
     Unary(UnOp, Name<'a>),
+    Icmp(IntCC, Name<'a>, Name<'a>),
+    Select(Name<'a>, Name<'a>, Name<'a>),
     Binary(BinOp, Name<'a>, Name<'a>),
 }
 

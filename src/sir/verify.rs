@@ -3,7 +3,7 @@ use std::fmt;
 use miette::Diagnostic;
 use thiserror::Error;
 
-use super::{Block, ControlFlow, Function, Inst, Terminator, Type, Value, ValueDef};
+use super::{Block, ControlFlow, Function, Inst, InstData, Terminator, Type, Value, ValueDef};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Use {
@@ -29,6 +29,10 @@ pub enum VerifyError {
     #[error("entry block params do not match the function signature")]
     #[diagnostic(code(sir::verify::entry_params))]
     EntryParams,
+
+    #[error("function params cannot be i8")]
+    #[diagnostic(code(sir::verify::i8_param))]
+    I8Param,
 
     #[error("{user} uses {value}, which is not defined in this function")]
     #[diagnostic(code(sir::verify::unknown_value))]
@@ -108,6 +112,9 @@ impl Verifier<'_> {
         if !matches {
             self.errors.push(VerifyError::EntryParams);
         }
+        if func.signature().params.contains(&Type::I8) {
+            self.errors.push(VerifyError::I8Param);
+        }
     }
 
     fn check_structure(&mut self) {
@@ -115,9 +122,7 @@ impl Verifier<'_> {
         for block in func.blocks() {
             let data = func.block(block);
             for &inst in data.insts() {
-                for &arg in func.inst(inst).args() {
-                    self.check_arg(Use::Inst(inst), arg, Type::I64);
-                }
+                self.check_inst(Use::Inst(inst), func.inst(inst));
             }
 
             let Some(terminator) = data.terminator() else {
@@ -136,11 +141,37 @@ impl Verifier<'_> {
                 }
                 Terminator::Jump { .. } | Terminator::Brif { .. } => {
                     if let Terminator::Brif { cond, .. } = terminator {
-                        self.check_arg(Use::Terminator(block), *cond, Type::I64);
+                        self.check_arg(Use::Terminator(block), *cond, Type::I8);
                     }
                     for (dest, args) in terminator.targets() {
                         self.check_edge(block, dest, args);
                     }
+                }
+            }
+        }
+    }
+
+    fn check_inst(&mut self, user: Use, data: &InstData) {
+        match data {
+            InstData::Iconst { .. } => {}
+            InstData::Unary { arg, .. } => self.check_arg(user, *arg, Type::I64),
+            InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
+                for &arg in args {
+                    self.check_arg(user, arg, Type::I64);
+                }
+            }
+            InstData::Select {
+                args: [cond, then_value, else_value],
+            } => {
+                self.check_arg(user, *cond, Type::I8);
+                if self.func.contains_value(*then_value) {
+                    let ty = self.func.value_type(*then_value);
+                    self.check_arg(user, *else_value, ty);
+                } else {
+                    self.errors.push(VerifyError::UnknownValue {
+                        user,
+                        value: *then_value,
+                    });
                 }
             }
         }

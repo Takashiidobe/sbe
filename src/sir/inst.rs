@@ -80,17 +80,86 @@ impl UnOp {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntCC {
+    Eq,
+    Ne,
+    Slt,
+    Sle,
+    Sgt,
+    Sge,
+    Ult,
+    Ule,
+    Ugt,
+    Uge,
+}
+
+impl IntCC {
+    const ALL: [IntCC; 10] = [
+        IntCC::Eq,
+        IntCC::Ne,
+        IntCC::Slt,
+        IntCC::Sle,
+        IntCC::Sgt,
+        IntCC::Sge,
+        IntCC::Ult,
+        IntCC::Ule,
+        IntCC::Ugt,
+        IntCC::Uge,
+    ];
+
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            IntCC::Eq => "eq",
+            IntCC::Ne => "ne",
+            IntCC::Slt => "slt",
+            IntCC::Sle => "sle",
+            IntCC::Sgt => "sgt",
+            IntCC::Sge => "sge",
+            IntCC::Ult => "ult",
+            IntCC::Ule => "ule",
+            IntCC::Ugt => "ugt",
+            IntCC::Uge => "uge",
+        }
+    }
+
+    pub fn from_mnemonic(text: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|cc| cc.mnemonic() == text)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstData {
-    Iconst { value: i64 },
-    Unary { op: UnOp, arg: Value },
-    Binary { op: BinOp, args: [Value; 2] },
+    Iconst {
+        value: i64,
+    },
+    Unary {
+        op: UnOp,
+        arg: Value,
+    },
+    Binary {
+        op: BinOp,
+        args: [Value; 2],
+    },
+    /// compares two i64s and yields an i8 that is exactly 0 or 1
+    Icmp {
+        cc: IntCC,
+        args: [Value; 2],
+    },
+    /// `args` is `[cond, then_value, else_value]`; `cond` is an i8 and the arms share a type
+    Select {
+        args: [Value; 3],
+    },
 }
 
 impl InstData {
-    pub fn result_type(&self) -> Type {
+    pub fn result_type(&self, type_of: impl Fn(Value) -> Type) -> Type {
         match self {
             InstData::Iconst { .. } | InstData::Unary { .. } | InstData::Binary { .. } => Type::I64,
+            InstData::Icmp { .. } => Type::I8,
+            InstData::Select {
+                args: [_, then_value, _],
+            } => type_of(*then_value),
         }
     }
 
@@ -98,7 +167,8 @@ impl InstData {
         match self {
             InstData::Iconst { .. } => &[],
             InstData::Unary { arg, .. } => std::slice::from_ref(arg),
-            InstData::Binary { args, .. } => args,
+            InstData::Binary { args, .. } | InstData::Icmp { args, .. } => args,
+            InstData::Select { args } => args,
         }
     }
 }

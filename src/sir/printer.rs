@@ -66,6 +66,10 @@ impl Display for Function {
                 write!(f, "    {} = ", self.inst_result(inst))?;
                 match self.inst(inst) {
                     InstData::Iconst { value } => writeln!(f, "iconst {value}")?,
+                    InstData::Icmp { cc, args: [a, b] } => {
+                        writeln!(f, "icmp {} {a}, {b}", cc.mnemonic())?
+                    }
+                    InstData::Select { args: [c, a, b] } => writeln!(f, "select {c}, {a}, {b}")?,
                     InstData::Unary { op, arg } => writeln!(f, "{} {arg}", op.mnemonic())?,
                     InstData::Binary { op, args: [a, b] } => {
                         writeln!(f, "{} {a}, {b}", op.mnemonic())?

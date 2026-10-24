@@ -4,7 +4,9 @@ use wasm_encoder::{
 };
 
 use super::error::CompileError;
-use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, Terminator, UnOp, Value, verify};
+use crate::sir::{
+    BinOp, Block, ControlFlow, Function, InstData, IntCC, Terminator, Type, UnOp, Value, verify,
+};
 
 pub struct Compiled {
     pub code: Vec<u8>,
@@ -54,6 +56,30 @@ impl Emitter<'_> {
             let result = self.local_of[self.func.inst_result(inst).index()];
             match self.func.inst(inst) {
                 InstData::Iconst { value } => self.op(Instruction::I64Const(*value)),
+                InstData::Icmp { cc, args: [a, b] } => {
+                    self.get(*a);
+                    self.get(*b);
+                    self.op(match cc {
+                        IntCC::Eq => Instruction::I64Eq,
+                        IntCC::Ne => Instruction::I64Ne,
+                        IntCC::Slt => Instruction::I64LtS,
+                        IntCC::Sle => Instruction::I64LeS,
+                        IntCC::Sgt => Instruction::I64GtS,
+                        IntCC::Sge => Instruction::I64GeS,
+                        IntCC::Ult => Instruction::I64LtU,
+                        IntCC::Ule => Instruction::I64LeU,
+                        IntCC::Ugt => Instruction::I64GtU,
+                        IntCC::Uge => Instruction::I64GeU,
+                    });
+                }
+                InstData::Select {
+                    args: [cond, then_value, else_value],
+                } => {
+                    self.get(*then_value);
+                    self.get(*else_value);
+                    self.get(*cond);
+                    self.op(Instruction::Select);
+                }
                 InstData::Unary { op, arg } => match op {
                     UnOp::Ineg => {
                         self.op(Instruction::I64Const(0));
@@ -110,12 +136,6 @@ impl Emitter<'_> {
         }
     }
 
-    fn emit_condition(&mut self, cond: Value) {
-        self.get(cond);
-        self.op(Instruction::I64Const(0));
-        self.op(Instruction::I64Ne);
-    }
-
     fn is_merge(&self, block: Block) -> bool {
         let forward = |&&p: &&Block| !self.cfg.is_retreating(p, block);
         self.cfg.predecessors(block).iter().filter(forward).count() >= 2
@@ -168,7 +188,7 @@ impl Emitter<'_> {
                 else_dest,
                 else_args,
             } => {
-                self.emit_condition(*cond);
+                self.get(*cond);
                 self.op(Instruction::If(BlockType::Empty));
                 ctx.push(Frame::Other);
                 self.do_branch(x, *then_dest, then_args, ctx);
@@ -231,7 +251,7 @@ impl Emitter<'_> {
                     else_dest,
                     else_args,
                 } => {
-                    self.emit_condition(*cond);
+                    self.get(*cond);
                     self.op(Instruction::If(BlockType::Empty));
                     self.dispatch_edge(
                         *then_dest,
@@ -291,7 +311,14 @@ pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
     }
 
     let reducible = cfg.is_reducible();
-    let mut locals = vec![((local_values.len() - num_params) as u32, ValType::I64)];
+    let mut locals: Vec<(u32, ValType)> = Vec::new();
+    for &value in &local_values[num_params..] {
+        let ty = val_type(func.value_type(value));
+        match locals.last_mut() {
+            Some((count, last)) if *last == ty => *count += 1,
+            _ => locals.push((1, ty)),
+        }
+    }
     if !reducible {
         locals.push((1, ValType::I32));
     }
@@ -315,8 +342,8 @@ pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
     let signature = func.signature();
     let mut types = TypeSection::new();
     types.ty().function(
-        signature.params.iter().map(|_| ValType::I64),
-        signature.returns.iter().map(|_| ValType::I64),
+        signature.params.iter().map(|&ty| val_type(ty)),
+        signature.returns.iter().map(|&ty| val_type(ty)),
     );
     let mut functions = FunctionSection::new();
     functions.function(0);
@@ -348,4 +375,11 @@ pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
 
     let wat = wasmprinter::print_bytes(&bytes).map_err(|e| CompileError::Print(e.to_string()))?;
     Ok(Compiled { code: bytes, wat })
+}
+
+fn val_type(ty: Type) -> ValType {
+    match ty {
+        Type::I8 => ValType::I32,
+        Type::I64 => ValType::I64,
+    }
 }

@@ -97,7 +97,8 @@ impl Function {
 
     pub fn push_inst(&mut self, block: Block, data: InstData) -> Value {
         let inst = Inst::from_index(self.insts.len());
-        let result = self.new_value(data.result_type(), ValueDef::Result(inst));
+        let ty = data.result_type(|v| self.value_type(v));
+        let result = self.new_value(ty, ValueDef::Result(inst));
         self.insts.push(InstEntry { data, result });
         self.blocks[block.index()].insts.push(inst);
         result

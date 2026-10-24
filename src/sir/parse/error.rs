@@ -18,6 +18,9 @@ pub enum ParseErrorKind {
     #[error("unknown instruction `{0}`")]
     UnknownOp(String),
 
+    #[error("unknown condition code `{0}`")]
+    UnknownCondition(String),
+
     #[error("block `{0}` is defined more than once")]
     DuplicateBlock(String),
 

@@ -1,6 +1,6 @@
 mod common;
 
-use sbe::sir::{FunctionBuilder, Signature, Type, parse_function};
+use sbe::sir::{FunctionBuilder, IntCC, Signature, Type, parse_function};
 use sbe::wasm::compile;
 use wasmi::{Engine, Instance, Linker, Module, Store};
 
@@ -166,8 +166,10 @@ fn builder_diamond() {
     let cond = builder.block_params(entry).unwrap()[0];
 
     builder.switch_to_block(entry).unwrap();
+    let zero = builder.iconst(0).unwrap();
+    let nonzero = builder.icmp(IntCC::Ne, cond, zero).unwrap();
     builder
-        .brif(cond, then_block, &[], else_block, &[])
+        .brif(nonzero, then_block, &[], else_block, &[])
         .unwrap();
     builder.switch_to_block(then_block).unwrap();
     let ten = builder.iconst(10).unwrap();
@@ -211,4 +213,38 @@ fn unary_ops_match_reference() {
             );
         }
     }
+}
+
+#[test]
+fn icmp_matches_reference() {
+    for cc in common::CONDITIONS {
+        let code = compile_text(&common::icmp_text(cc));
+        let (mut store, f) = typed::<(i64, i64), i32>(&code, "f");
+        for a in common::SAMPLES {
+            for b in common::SAMPLES {
+                let got = f.call(&mut store, (a, b)).unwrap();
+                assert_eq!(got, common::icmp_reference(cc, a, b) as i32, "{cc} {a} {b}");
+            }
+        }
+    }
+}
+
+#[test]
+fn select_picks_by_condition() {
+    let code = compile_text(common::MIN_BY_SELECT);
+    let (mut store, f) = typed::<(i64, i64), i64>(&code, "f");
+    for a in common::SAMPLES {
+        for b in common::SAMPLES {
+            assert_eq!(f.call(&mut store, (a, b)).unwrap(), a.min(b), "min {a} {b}");
+        }
+    }
+}
+
+#[test]
+fn i8_block_param_carries_comparison() {
+    let code = compile_text(common::I8_BLOCK_PARAM);
+    let (mut store, f) = typed::<(i64, i64), i32>(&code, "f");
+    assert_eq!(f.call(&mut store, (1, 2)).unwrap(), 1);
+    assert_eq!(f.call(&mut store, (2, 1)).unwrap(), 0);
+    assert_eq!(f.call(&mut store, (-1, 1)).unwrap(), 0);
 }

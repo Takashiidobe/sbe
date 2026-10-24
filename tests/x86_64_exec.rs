@@ -3,7 +3,7 @@
 mod common;
 
 use memmap2::MmapMut;
-use sbe::sir::{FunctionBuilder, Signature, Type, parse_function};
+use sbe::sir::{FunctionBuilder, IntCC, Signature, Type, parse_function};
 use sbe::x86_64::compile;
 
 fn load(code: &[u8]) -> memmap2::Mmap {
@@ -162,8 +162,10 @@ fn builder_diamond() {
     let cond = builder.block_params(entry).unwrap()[0];
 
     builder.switch_to_block(entry).unwrap();
+    let zero = builder.iconst(0).unwrap();
+    let nonzero = builder.icmp(IntCC::Ne, cond, zero).unwrap();
     builder
-        .brif(cond, then_block, &[], else_block, &[])
+        .brif(nonzero, then_block, &[], else_block, &[])
         .unwrap();
     builder.switch_to_block(then_block).unwrap();
     let ten = builder.iconst(10).unwrap();
@@ -221,4 +223,41 @@ fn shift_and_divide_survive_register_pressure() {
     let (a, b, c, d) = (3i64, -100, 7, 5);
     let expected = (((a << d) + b / c) as u64 % d as u64) as i64 + a + b + c;
     assert_eq!(f(a, b, c, d), expected);
+}
+
+#[test]
+fn icmp_matches_reference() {
+    for cc in common::CONDITIONS {
+        let map = compile_text(&common::icmp_text(cc));
+        let f: extern "C" fn(i64, i64) -> u8 = unsafe { std::mem::transmute(map.as_ptr()) };
+        for a in common::SAMPLES {
+            for b in common::SAMPLES {
+                assert_eq!(
+                    f(a, b),
+                    common::icmp_reference(cc, a, b) as u8,
+                    "{cc} {a} {b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn select_picks_by_condition() {
+    let map = compile_text(common::MIN_BY_SELECT);
+    let f: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    for a in common::SAMPLES {
+        for b in common::SAMPLES {
+            assert_eq!(f(a, b), a.min(b), "min {a} {b}");
+        }
+    }
+}
+
+#[test]
+fn i8_block_param_carries_comparison() {
+    let map = compile_text(common::I8_BLOCK_PARAM);
+    let f: extern "C" fn(i64, i64) -> u8 = unsafe { std::mem::transmute(map.as_ptr()) };
+    assert_eq!(f(1, 2), 1);
+    assert_eq!(f(2, 1), 0);
+    assert_eq!(f(-1, 1), 0);
 }

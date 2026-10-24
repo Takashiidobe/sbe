@@ -2,8 +2,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    BinOp, Block, Function, InstData, Signature, Terminator, Type, UnOp, Value, VerifyErrors,
-    verify::verify,
+    BinOp, Block, Function, InstData, IntCC, Signature, Terminator, Type, UnOp, Value,
+    VerifyErrors, verify::verify,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Diagnostic)]
@@ -72,6 +72,26 @@ impl FunctionBuilder {
     pub fn unary(&mut self, op: UnOp, arg: Value) -> Result<Value, BuilderError> {
         self.check_value(arg)?;
         self.emit(InstData::Unary { op, arg })
+    }
+
+    pub fn icmp(&mut self, cc: IntCC, a: Value, b: Value) -> Result<Value, BuilderError> {
+        self.check_value(a)?;
+        self.check_value(b)?;
+        self.emit(InstData::Icmp { cc, args: [a, b] })
+    }
+
+    pub fn select(
+        &mut self,
+        cond: Value,
+        then_value: Value,
+        else_value: Value,
+    ) -> Result<Value, BuilderError> {
+        self.check_value(cond)?;
+        self.check_value(then_value)?;
+        self.check_value(else_value)?;
+        self.emit(InstData::Select {
+            args: [cond, then_value, else_value],
+        })
     }
 
     pub fn binary(&mut self, op: BinOp, a: Value, b: Value) -> Result<Value, BuilderError> {

@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 
 use iced_x86::code_asm::{
-    AsmRegister64, CodeAssembler, cl, r8, r9, r10, r11, rax, rcx, rdi, rdx, rsi,
+    AsmRegister8, AsmRegister64, CodeAssembler, al, cl, dil, dl, r8, r8b, r9, r9b, r10, r10b, r11,
+    r11b, rax, rcx, rdi, rdx, rsi, sil,
 };
 use iced_x86::{Formatter, IntelFormatter};
 
 use super::error::CompileError;
-use super::vcode::{AluOp, Inst, PReg, ShiftOp, UnaryOp, VCode};
+use super::vcode::{AluOp, Cc, Inst, PReg, ShiftOp, UnaryOp, VCode};
 
 pub struct Compiled {
     pub name: String,
@@ -25,6 +26,20 @@ fn asm_reg(reg: PReg) -> AsmRegister64 {
         PReg::R9 => r9,
         PReg::R10 => r10,
         PReg::R11 => r11,
+    }
+}
+
+fn asm_reg8(reg: PReg) -> AsmRegister8 {
+    match reg {
+        PReg::Rax => al,
+        PReg::Rcx => cl,
+        PReg::Rdx => dl,
+        PReg::Rsi => sil,
+        PReg::Rdi => dil,
+        PReg::R8 => r8b,
+        PReg::R9 => r9b,
+        PReg::R10 => r10b,
+        PReg::R11 => r11b,
     }
 }
 
@@ -86,6 +101,38 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
                     UnaryOp::Not => a.not(asm_reg(dst)),
                 },
                 Inst::Cqo { .. } => a.cqo(),
+                Inst::Cmp { a: x, b } => a.cmp(asm_reg(x), asm_reg(b)),
+                Inst::Setcc { cc, dst } => {
+                    let dst = asm_reg8(dst);
+                    match cc {
+                        Cc::E => a.sete(dst),
+                        Cc::Ne => a.setne(dst),
+                        Cc::L => a.setl(dst),
+                        Cc::Le => a.setle(dst),
+                        Cc::G => a.setg(dst),
+                        Cc::Ge => a.setge(dst),
+                        Cc::B => a.setb(dst),
+                        Cc::Be => a.setbe(dst),
+                        Cc::A => a.seta(dst),
+                        Cc::Ae => a.setae(dst),
+                    }
+                }
+                Inst::Movzx8 { dst } => a.movzx(asm_reg(dst), asm_reg8(dst)),
+                Inst::Cmov { cc, dst, src } => {
+                    let (dst, src) = (asm_reg(dst), asm_reg(src));
+                    match cc {
+                        Cc::E => a.cmove(dst, src),
+                        Cc::Ne => a.cmovne(dst, src),
+                        Cc::L => a.cmovl(dst, src),
+                        Cc::Le => a.cmovle(dst, src),
+                        Cc::G => a.cmovg(dst, src),
+                        Cc::Ge => a.cmovge(dst, src),
+                        Cc::B => a.cmovb(dst, src),
+                        Cc::Be => a.cmovbe(dst, src),
+                        Cc::A => a.cmova(dst, src),
+                        Cc::Ae => a.cmovae(dst, src),
+                    }
+                }
                 Inst::Div {
                     signed, divisor, ..
                 } => {

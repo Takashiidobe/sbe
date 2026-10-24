@@ -155,9 +155,41 @@ impl UnaryOp {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cc {
+    E,
+    Ne,
+    L,
+    Le,
+    G,
+    Ge,
+    B,
+    Be,
+    A,
+    Ae,
+}
+
+impl Cc {
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Cc::E => "e",
+            Cc::Ne => "ne",
+            Cc::L => "l",
+            Cc::Le => "le",
+            Cc::G => "g",
+            Cc::Ge => "ge",
+            Cc::B => "b",
+            Cc::Be => "be",
+            Cc::A => "a",
+            Cc::Ae => "ae",
+        }
+    }
+}
+
 /// two-address instructions: `Alu` reads and writes `dst`. `Shift` takes its count in `cl`, so
 /// `count` is `rcx` by the time of emission. `Cqo` and `Div` work on the `hi:lo` pair, which is
-/// `rdx:rax`; the quotient lands in `lo` and the remainder in `hi`. branches end a block: a conditional
+/// `rdx:rax`; the quotient lands in `lo` and the remainder in `hi`. `Setcc` writes only the low
+/// byte of `dst`, so it is always followed by `Movzx8`. branches end a block: a conditional
 /// `Jnz` is always followed by a `Jmp`, so blocks never fall through implicitly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Inst<R> {
@@ -186,6 +218,22 @@ pub enum Inst<R> {
     Cqo {
         hi: R,
         lo: R,
+    },
+    Cmp {
+        a: R,
+        b: R,
+    },
+    Setcc {
+        cc: Cc,
+        dst: R,
+    },
+    Movzx8 {
+        dst: R,
+    },
+    Cmov {
+        cc: Cc,
+        dst: R,
+        src: R,
     },
     Div {
         signed: bool,
@@ -216,6 +264,10 @@ impl<R: Copy> Inst<R> {
             Inst::Shift { dst, count, .. } => vec![dst, count],
             Inst::Unary { dst, .. } => vec![dst],
             Inst::Cqo { lo, .. } => vec![lo],
+            Inst::Cmp { a, b } => vec![a, b],
+            Inst::Setcc { .. } => vec![],
+            Inst::Movzx8 { dst } => vec![dst],
+            Inst::Cmov { dst, src, .. } => vec![dst, src],
             Inst::Div {
                 divisor, lo, hi, ..
             } => vec![divisor, lo, hi],
@@ -229,10 +281,17 @@ impl<R: Copy> Inst<R> {
             | Inst::Mov { dst, .. }
             | Inst::Alu { dst, .. }
             | Inst::Shift { dst, .. }
-            | Inst::Unary { dst, .. } => vec![dst],
+            | Inst::Unary { dst, .. }
+            | Inst::Setcc { dst, .. }
+            | Inst::Movzx8 { dst }
+            | Inst::Cmov { dst, .. } => vec![dst],
             Inst::Cqo { hi, .. } => vec![hi],
             Inst::Div { lo, hi, .. } => vec![lo, hi],
-            Inst::Test { .. } | Inst::Jnz { .. } | Inst::Jmp { .. } | Inst::Ret { .. } => vec![],
+            Inst::Cmp { .. }
+            | Inst::Test { .. }
+            | Inst::Jnz { .. }
+            | Inst::Jmp { .. }
+            | Inst::Ret { .. } => vec![],
         }
     }
 
@@ -261,6 +320,14 @@ impl<R: Copy> Inst<R> {
                 count: f(count),
             },
             Inst::Unary { op, dst } => Inst::Unary { op, dst: f(dst) },
+            Inst::Cmp { a, b } => Inst::Cmp { a: f(a), b: f(b) },
+            Inst::Setcc { cc, dst } => Inst::Setcc { cc, dst: f(dst) },
+            Inst::Movzx8 { dst } => Inst::Movzx8 { dst: f(dst) },
+            Inst::Cmov { cc, dst, src } => Inst::Cmov {
+                cc,
+                dst: f(dst),
+                src: f(src),
+            },
             Inst::Cqo { hi, lo } => Inst::Cqo {
                 hi: f(hi),
                 lo: f(lo),
@@ -293,6 +360,10 @@ impl<R: fmt::Display> fmt::Display for Inst<R> {
             Inst::Shift { op, dst, .. } => write!(f, "{} {dst}, cl", op.mnemonic()),
             Inst::Unary { op, dst } => write!(f, "{} {dst}", op.mnemonic()),
             Inst::Cqo { .. } => f.write_str("cqo"),
+            Inst::Cmp { a, b } => write!(f, "cmp {a}, {b}"),
+            Inst::Setcc { cc, dst } => write!(f, "set{} {dst}", cc.suffix()),
+            Inst::Movzx8 { dst } => write!(f, "movzx {dst}, {dst}"),
+            Inst::Cmov { cc, dst, src } => write!(f, "cmov{} {dst}, {src}", cc.suffix()),
             Inst::Div {
                 signed, divisor, ..
             } => write!(f, "{} {divisor}", if *signed { "idiv" } else { "div" }),
