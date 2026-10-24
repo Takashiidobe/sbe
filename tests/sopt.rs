@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use sbe::sir::{Function, InstData, Signature, Terminator, Value, parse_function};
+use sbe::sir::{BinOp, Function, InstData, Signature, Terminator, Value, parse_function};
 use sbe::sopt::{NullPass, Pass, PassManager};
 
 fn identity() -> Function {
@@ -39,7 +39,8 @@ impl Pass for Breaker {
         let entry = func.entry_block();
         func.push_inst(
             entry,
-            InstData::Iadd {
+            InstData::Binary {
+                op: BinOp::Iadd,
                 args: [bogus, bogus],
             },
         );

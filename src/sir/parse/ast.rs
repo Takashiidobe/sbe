@@ -1,6 +1,6 @@
 use miette::SourceSpan;
 
-use crate::sir::Type;
+use crate::sir::{BinOp, Type};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Name<'a> {
@@ -15,7 +15,7 @@ pub(super) struct Param<'a> {
 
 pub(super) enum Op<'a> {
     Iconst(i64),
-    Iadd(Name<'a>, Name<'a>),
+    Binary(BinOp, Name<'a>, Name<'a>),
 }
 
 pub(super) struct InstAst<'a> {

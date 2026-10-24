@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::error::CompileError;
 use super::vcode::{Inst, Label, PReg, Reg, VBlock, VCode, VReg};
-use crate::sir::{Block, ControlFlow, Function, InstData, Terminator, Value};
+use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, Terminator, Value};
 
 fn vreg(value: Value) -> Reg {
     Reg::V(VReg::from_index(value.index()))
@@ -115,7 +115,10 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                     dst: result,
                     imm: *value,
                 }),
-                InstData::Iadd { args: [a, b] } => {
+                InstData::Binary {
+                    op: BinOp::Iadd,
+                    args: [a, b],
+                } => {
                     insts.push(Inst::Mov {
                         dst: result,
                         src: vreg(*a),

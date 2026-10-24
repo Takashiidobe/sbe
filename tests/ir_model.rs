@@ -1,4 +1,4 @@
-use sbe::sir::{Function, InstData, Signature, Terminator, Type, ValueDef};
+use sbe::sir::{BinOp, Function, InstData, Signature, Terminator, Type, ValueDef};
 
 fn add_function() -> Function {
     let signature = Signature {
@@ -8,7 +8,13 @@ fn add_function() -> Function {
     let mut func = Function::new("add", signature);
     let entry = func.entry_block();
     let [a, b] = [0, 1].map(|i| func.block(entry).params()[i]);
-    let sum = func.push_inst(entry, InstData::Iadd { args: [a, b] });
+    let sum = func.push_inst(
+        entry,
+        InstData::Binary {
+            op: BinOp::Iadd,
+            args: [a, b],
+        },
+    );
     func.set_terminator(entry, Terminator::Return { values: vec![sum] });
     func
 }

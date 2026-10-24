@@ -4,7 +4,7 @@ use wasm_encoder::{
 };
 
 use super::error::CompileError;
-use crate::sir::{Block, ControlFlow, Function, InstData, Terminator, Value, verify};
+use crate::sir::{BinOp, Block, ControlFlow, Function, InstData, Terminator, Value, verify};
 
 pub struct Compiled {
     pub code: Vec<u8>,
@@ -40,7 +40,10 @@ impl Emitter<'_> {
             let result = self.local_of[self.func.inst_result(inst).index()];
             match self.func.inst(inst) {
                 InstData::Iconst { value } => self.op(Instruction::I64Const(*value)),
-                InstData::Iadd { args: [a, b] } => {
+                InstData::Binary {
+                    op: BinOp::Iadd,
+                    args: [a, b],
+                } => {
                     self.get(*a);
                     self.get(*b);
                     self.op(Instruction::I64Add);

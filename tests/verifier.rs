@@ -1,5 +1,5 @@
 use sbe::sir::{
-    Block, Function, InstData, Signature, Terminator, Type, Use, Value, VerifyError, verify,
+    BinOp, Block, Function, InstData, Signature, Terminator, Type, Use, Value, VerifyError, verify,
 };
 
 fn sig(params: usize, returns: usize) -> Signature {
@@ -18,7 +18,13 @@ fn valid_function_passes() {
     let mut func = Function::new("add", sig(2, 1));
     let entry = func.entry_block();
     let [a, b] = [0, 1].map(|i| func.block(entry).params()[i]);
-    let sum = func.push_inst(entry, InstData::Iadd { args: [a, b] });
+    let sum = func.push_inst(
+        entry,
+        InstData::Binary {
+            op: BinOp::Iadd,
+            args: [a, b],
+        },
+    );
     func.set_terminator(entry, Terminator::Return { values: vec![sum] });
     assert_eq!(errors(&func), []);
 }
@@ -54,7 +60,8 @@ fn use_before_def_in_same_block() {
     let later = Value::from_index(1);
     let first = func.push_inst(
         entry,
-        InstData::Iadd {
+        InstData::Binary {
+            op: BinOp::Iadd,
             args: [later, later],
         },
     );
@@ -151,7 +158,13 @@ fn loop_back_edge_with_block_params_is_fine() {
             args: vec![x],
         },
     );
-    let next = func.push_inst(head, InstData::Iadd { args: [acc, acc] });
+    let next = func.push_inst(
+        head,
+        InstData::Binary {
+            op: BinOp::Iadd,
+            args: [acc, acc],
+        },
+    );
     func.set_terminator(
         head,
         Terminator::Jump {

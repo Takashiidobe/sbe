@@ -1,22 +1,42 @@
 use super::{Block, Type, Value};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinOp {
+    Iadd,
+}
+
+impl BinOp {
+    pub fn mnemonic(self) -> &'static str {
+        match self {
+            BinOp::Iadd => "iadd",
+        }
+    }
+
+    pub fn from_mnemonic(text: &str) -> Option<Self> {
+        match text {
+            "iadd" => Some(BinOp::Iadd),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstData {
     Iconst { value: i64 },
-    Iadd { args: [Value; 2] },
+    Binary { op: BinOp, args: [Value; 2] },
 }
 
 impl InstData {
     pub fn result_type(&self) -> Type {
         match self {
-            InstData::Iconst { .. } | InstData::Iadd { .. } => Type::I64,
+            InstData::Iconst { .. } | InstData::Binary { .. } => Type::I64,
         }
     }
 
     pub fn args(&self) -> &[Value] {
         match self {
             InstData::Iconst { .. } => &[],
-            InstData::Iadd { args } => args,
+            InstData::Binary { args, .. } => args,
         }
     }
 }

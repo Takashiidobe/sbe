@@ -2,7 +2,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    Block, Function, InstData, Signature, Terminator, Type, Value, VerifyErrors, verify::verify,
+    BinOp, Block, Function, InstData, Signature, Terminator, Type, Value, VerifyErrors,
+    verify::verify,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Diagnostic)]
@@ -68,10 +69,14 @@ impl FunctionBuilder {
         self.emit(InstData::Iconst { value })
     }
 
-    pub fn iadd(&mut self, a: Value, b: Value) -> Result<Value, BuilderError> {
+    pub fn binary(&mut self, op: BinOp, a: Value, b: Value) -> Result<Value, BuilderError> {
         self.check_value(a)?;
         self.check_value(b)?;
-        self.emit(InstData::Iadd { args: [a, b] })
+        self.emit(InstData::Binary { op, args: [a, b] })
+    }
+
+    pub fn iadd(&mut self, a: Value, b: Value) -> Result<Value, BuilderError> {
+        self.binary(BinOp::Iadd, a, b)
     }
 
     pub fn ret(&mut self, value: Value) -> Result<(), BuilderError> {
