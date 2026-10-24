@@ -6,6 +6,7 @@
 
 Click any identifier to see where it is defined and every place it is referenced, with the
 enclosing function of each use. Rebuild the index first with tools/index.sh if sources changed.
+Syntax highlighting uses pygments when it is installed and is skipped otherwise.
 """
 
 import html
@@ -14,6 +15,13 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
+
+try:
+    from pygments import lex
+    from pygments.lexers import RustLexer
+    from pygments.token import Comment, Keyword, Name, Number, String
+except ImportError:
+    lex = None
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -104,8 +112,79 @@ def collect(index):
     return names, defs, refs, calls
 
 
+KEYWORDS = {
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+    "return", "self", "static", "struct", "super", "trait", "type", "unsafe", "use", "where", "while",
+}
+PRIMITIVES = {
+    "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
+    "f32", "f64", "bool", "char", "str",
+}
+
+
+def token_class(ttype, text):
+    if text in PRIMITIVES:
+        return "ty"
+    if text in KEYWORDS:
+        return "k"
+    if ttype in Comment.Preproc:
+        return "at"
+    if ttype in Comment:
+        return "cm"
+    if ttype in String.Doc:
+        return "cm"
+    if ttype in String:
+        return "st"
+    if ttype in Number:
+        return "nu"
+    if ttype in Keyword.Type or ttype in Name.Builtin:
+        return "ty"
+    if ttype in Keyword.Pseudo:
+        return None
+    if ttype in Keyword:
+        return "k"
+    if ttype in Name.Function.Magic:
+        return "mc"
+    if ttype in Name.Attribute:
+        return "lt"
+    return None
+
+
+def syntax_classes(source):
+    """one css class (or None) per character of `source`"""
+    classes = [None] * len(source)
+    if lex is None:
+        return classes
+    tokens = list(lex(source, RustLexer(stripnl=False, ensurenl=False)))
+    if sum(len(text) for _, text in tokens) != len(source):
+        return classes
+    pos = 0
+    for i, (ttype, text) in enumerate(tokens):
+        cls = token_class(ttype, text)
+        if text == "'" and i + 1 < len(tokens) and tokens[i + 1][0] in Name.Attribute:
+            cls = "lt"
+        if cls:
+            classes[pos : pos + len(text)] = [cls] * len(text)
+        pos += len(text)
+    return classes
+
+
+def highlight(text, classes):
+    out, i = [], 0
+    while i < len(text):
+        cls, j = classes[i], i
+        while j < len(text) and classes[j] == cls:
+            j += 1
+        chunk = html.escape(text[i:j])
+        out.append(f'<span class="t-{cls}">{chunk}</span>' if cls else chunk)
+        i = j
+    return "".join(out)
+
+
 def render_file(doc, source, defs):
     lines = source.split("\n")
+    classes = syntax_classes(source)
     by_line = defaultdict(list)
     for occ in doc.get("occurrences", []):
         rng = occ["range"]
@@ -117,19 +196,22 @@ def render_file(doc, source, defs):
         by_line[rng[0]].append((rng[1], rng[2], symbol, bool(occ.get("symbol_roles", 0) & DEFINITION)))
 
     rows = []
+    offset = 0
     for number, text in enumerate(lines):
+        line_classes = classes[offset : offset + len(text)]
+        offset += len(text) + 1
         pieces, cursor = [], 0
         for start, end, symbol, is_def in sorted(by_line.get(number, [])):
             if start < cursor:
                 continue
-            pieces.append(html.escape(text[cursor:start]))
+            pieces.append(highlight(text[cursor:start], line_classes[cursor:start]))
             cls = "s d" if is_def else "s"
             pieces.append(
                 f'<span class="{cls}" data-s="{html.escape(symbol, quote=True)}">'
-                f"{html.escape(text[start:end])}</span>"
+                f"{highlight(text[start:end], line_classes[start:end])}</span>"
             )
             cursor = end
-        pieces.append(html.escape(text[cursor:]))
+        pieces.append(highlight(text[cursor:], line_classes[cursor:]))
         rows.append(
             f'<tr id="L{number + 1}"><td class="n">{number + 1}</td><td class="c">{"".join(pieces)}</td></tr>'
         )
@@ -137,9 +219,11 @@ def render_file(doc, source, defs):
 
 
 STYLE = """
-:root { --bg:#fff; --fg:#1f2328; --mut:#6e7781; --acc:#0969da; --line:#d0d7de; --hl:#fff8c5; --pan:#f6f8fa; }
+:root { --bg:#fff; --fg:#1f2328; --mut:#6e7781; --acc:#0969da; --line:#d0d7de; --hl:#fff8c5; --pan:#f6f8fa;
+        --k:#cf222e; --ty:#953800; --st:#0a3069; --nu:#0550ae; --cm:#6e7781; --at:#116329; --lt:#8250df; --mc:#8250df; }
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#0d1117; --fg:#e6edf3; --mut:#8b949e; --acc:#58a6ff; --line:#30363d; --hl:#3d3300; --pan:#161b22; }
+  :root { --bg:#0d1117; --fg:#e6edf3; --mut:#8b949e; --acc:#58a6ff; --line:#30363d; --hl:#3d3300; --pan:#161b22;
+          --k:#ff7b72; --ty:#ffa657; --st:#a5d6ff; --nu:#79c0ff; --cm:#8b949e; --at:#7ee787; --lt:#d2a8ff; --mc:#d2a8ff; }
 }
 body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, sans-serif; }
 a { color:var(--acc); text-decoration:none; } a:hover { text-decoration:underline; }
@@ -153,6 +237,8 @@ table { border-collapse:collapse; font:13px/1.45 ui-monospace, monospace; }
 td.n { color:var(--mut); text-align:right; padding:0 12px; user-select:none; }
 td.c { white-space:pre; padding-right:16px; }
 tr.hl { background:var(--hl); }
+.t-k { color:var(--k); } .t-ty { color:var(--ty); } .t-st { color:var(--st); } .t-nu { color:var(--nu); }
+.t-cm { color:var(--cm); font-style:italic; } .t-at { color:var(--at); } .t-lt, .t-mc { color:var(--lt); }
 .s { cursor:pointer; } .s:hover, .s.on { background:var(--hl); border-radius:2px; } .s.d { font-weight:600; }
 aside { width:380px; flex:none; position:sticky; top:0; max-height:100vh; overflow:auto;
         padding:12px 16px; background:var(--pan); border-left:1px solid var(--line); }
