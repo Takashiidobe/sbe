@@ -92,6 +92,12 @@ fn run_stage(stage: &str, path: &Path, source: &str) -> Result<String, Failed> {
                 Err(errors) => render_string(&errors),
             });
         }
+        "module-wasm" => {
+            let module = parse_module(&name, source).map_err(render)?;
+            let compiled = wasm::compile_module(&module).map_err(render)?;
+            wasmparser::validate(&compiled.code).map_err(|e| format!("invalid wasm: {e}"))?;
+            return Ok(compiled.wat);
+        }
         "module-parse-error" => {
             return match parse_module(&name, source) {
                 Ok(_) => Err("expected a parse error".into()),

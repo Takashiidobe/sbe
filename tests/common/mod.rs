@@ -113,3 +113,13 @@ pub fn icmp_text(cc: &str) -> String {
 pub const MIN_BY_SELECT: &str = "function %f(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n    v2 = icmp slt v0, v1\n    v3 = select v2, v0, v1\n    return v3\n}\n";
 
 pub const I8_BLOCK_PARAM: &str = "function %f(i64, i64) -> i8 {\nblock0(v0: i64, v1: i64):\n    v2 = icmp ult v0, v1\n    jump block1(v2)\n\nblock1(v3: i8):\n    return v3\n}\n";
+
+pub const CALLS: &str = include_str!("../programs/calls.sir");
+
+pub fn calls_scale(x: i64) -> i64 {
+    x * 2
+}
+
+pub fn calls_run(n: i64) -> i64 {
+    (1..=calls_scale(n)).product::<i64>() + n
+}

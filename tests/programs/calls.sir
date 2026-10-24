@@ -1,0 +1,33 @@
+import %scale(i64) -> i64
+import %note(i64)
+
+function %fact(i64) -> i64 {
+    fn0 = %fact(i64) -> i64
+
+block0(v0: i64):
+    v1 = iconst i64 1
+    v2 = icmp sle v0, v1
+    brif v2, block1, block2
+
+block1:
+    return v1
+
+block2:
+    v3 = isub v0, v1
+    v4 = call fn0(v3)
+    v5 = imul v0, v4
+    return v5
+}
+
+function %run(i64) -> i64 {
+    fn0 = %scale(i64) -> i64
+    fn1 = %note(i64)
+    fn2 = %fact(i64) -> i64
+
+block0(v0: i64):
+    v1 = call fn0(v0)
+    call fn1(v1)
+    v2 = call fn2(v1)
+    v3 = iadd v2, v0
+    return v3
+}

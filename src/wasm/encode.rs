@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+
 use wasm_encoder::{
-    BlockType, CodeSection, ExportKind, ExportSection, Function as WasmFunction, FunctionSection,
-    IndirectNameMap, Instruction, Module, NameMap, NameSection, TypeSection, ValType,
+    BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function as WasmFunction,
+    FunctionSection, ImportSection, IndirectNameMap, Instruction, Module as WasmModule, NameMap,
+    NameSection, TypeSection, ValType,
 };
 
 use super::error::CompileError;
 use crate::sir::{
-    BinOp, Block, ControlFlow, CvtOp, Function, InstData, IntCC, Terminator, Type, UnOp, Value,
-    ValueDef, verify,
+    BinOp, Block, ControlFlow, CvtOp, Function, InstData, IntCC, Module, Signature, Terminator,
+    Type, UnOp, Value, ValueDef, verify_module,
 };
 
 pub struct Compiled {
@@ -26,6 +29,7 @@ struct Emitter<'a> {
     cfg: ControlFlow,
     dom_children: Vec<Vec<Block>>,
     local_of: Vec<u32>,
+    callee_index: Vec<u32>,
     body: WasmFunction,
 }
 
@@ -195,7 +199,10 @@ impl Emitter<'_> {
 
     fn emit_insts(&mut self, block: Block) {
         for &inst in self.func.block(block).insts() {
-            let result = self.local_of[self.func.inst_result(inst).map_or(0, |v| v.index())];
+            let result = self
+                .func
+                .inst_result(inst)
+                .map(|v| self.local_of[v.index()]);
             match self.func.inst(inst) {
                 InstData::Iconst {
                     ty: Type::I64,
@@ -240,9 +247,16 @@ impl Emitter<'_> {
                 InstData::Binary { op, args: [a, b] } => {
                     self.emit_binary(*op, self.ty(*a), *a, *b);
                 }
-                InstData::Call { .. } => unreachable!("rejected in compile"),
+                InstData::Call { callee, args } => {
+                    for &arg in args {
+                        self.get(arg);
+                    }
+                    self.op(Instruction::Call(self.callee_index[callee.index()]));
+                }
             }
-            self.op(Instruction::LocalSet(result));
+            if let Some(result) = result {
+                self.op(Instruction::LocalSet(result));
+            }
         }
     }
 
@@ -411,12 +425,10 @@ impl Emitter<'_> {
 }
 
 /// every sir value lives in its own wasm local; params are the first locals
-pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
-    verify(func)?;
-    if !func.callees().is_empty() {
-        return Err(CompileError::Call);
-    }
-
+fn compile_body(
+    func: &Function,
+    function_index: &HashMap<&str, u32>,
+) -> (WasmFunction, Vec<Value>) {
     let cfg = ControlFlow::compute(func);
     let mut local_values: Vec<Value> = Vec::new();
     let mut local_of = vec![0u32; func.num_values()];
@@ -458,6 +470,11 @@ pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
         cfg,
         dom_children,
         local_of,
+        callee_index: func
+            .callees()
+            .iter()
+            .map(|callee| function_index[callee.name.as_str()])
+            .collect(),
         body: WasmFunction::new(locals),
     };
     if reducible {
@@ -470,39 +487,86 @@ pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
     emitter.op(Instruction::End);
     let body = emitter.body;
 
-    let signature = func.signature();
-    let mut types = TypeSection::new();
-    types.ty().function(
-        signature.params.iter().map(|&ty| val_type(ty)),
-        signature.returns.iter().map(|&ty| val_type(ty)),
-    );
-    let mut functions = FunctionSection::new();
-    functions.function(0);
-    let mut exports = ExportSection::new();
-    exports.export(func.name(), ExportKind::Func, 0);
-    let mut code = CodeSection::new();
-    code.function(&body);
+    (body, local_values)
+}
 
-    let mut function_names = NameMap::new();
-    function_names.append(0, func.name());
-    let mut local_names = NameMap::new();
-    for (index, value) in local_values.iter().enumerate() {
-        local_names.append(index as u32, &value.to_string());
+/// a function that calls others gets each distinct callee as an import from `env`
+pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
+    let mut module = Module::new();
+    for callee in func.callees() {
+        let known = module.imports().iter().any(|i| i.name == callee.name);
+        if callee.name != func.name() && !known {
+            module.declare_import(callee.name.clone(), callee.signature.clone());
+        }
     }
+    module.add_function(func.clone());
+    compile_module(&module)
+}
+
+/// imports come first in the function index space, in declaration order, under module `env`;
+/// every defined function is exported by name
+pub fn compile_module(module: &Module) -> Result<Compiled, CompileError> {
+    verify_module(module)?;
+
+    let mut function_index: HashMap<&str, u32> = HashMap::new();
+    let imports = module.imports().iter().map(|i| i.name.as_str());
+    let defined = module.functions().iter().map(Function::name);
+    for (index, name) in imports.chain(defined).enumerate() {
+        function_index.insert(name, index as u32);
+    }
+
+    let mut types = TypeSection::new();
+    let mut imports = ImportSection::new();
+    let mut functions = FunctionSection::new();
+    let mut exports = ExportSection::new();
+    let mut code = CodeSection::new();
+    let mut function_names = NameMap::new();
     let mut all_local_names = IndirectNameMap::new();
-    all_local_names.append(0, &local_names);
+
+    let mut next_type = 0;
+    let mut add_type = |signature: &Signature| {
+        types.ty().function(
+            signature.params.iter().map(|&ty| val_type(ty)),
+            signature.returns.iter().map(|&ty| val_type(ty)),
+        );
+        next_type += 1;
+        next_type - 1
+    };
+
+    for import in module.imports() {
+        let ty = add_type(&import.signature);
+        imports.import("env", &import.name, EntityType::Function(ty));
+        function_names.append(function_index[import.name.as_str()], &import.name);
+    }
+    for func in module.functions() {
+        let index = function_index[func.name()];
+        functions.function(add_type(func.signature()));
+        exports.export(func.name(), ExportKind::Func, index);
+        function_names.append(index, func.name());
+
+        let (body, local_values) = compile_body(func, &function_index);
+        code.function(&body);
+        let mut local_names = NameMap::new();
+        for (local, value) in local_values.iter().enumerate() {
+            local_names.append(local as u32, &value.to_string());
+        }
+        all_local_names.append(index, &local_names);
+    }
+
     let mut names = NameSection::new();
     names.functions(&function_names);
     names.locals(&all_local_names);
 
-    let mut module = Module::new();
-    module
-        .section(&types)
-        .section(&functions)
+    let mut wasm = WasmModule::new();
+    wasm.section(&types);
+    if !module.imports().is_empty() {
+        wasm.section(&imports);
+    }
+    wasm.section(&functions)
         .section(&exports)
         .section(&code)
         .section(&names);
-    let bytes = module.finish();
+    let bytes = wasm.finish();
 
     let wat = wasmprinter::print_bytes(&bytes).map_err(|e| CompileError::Print(e.to_string()))?;
     Ok(Compiled { code: bytes, wat })

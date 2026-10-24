@@ -1,17 +1,13 @@
 use miette::Diagnostic;
 use thiserror::Error;
 
-use crate::sir::VerifyErrors;
+use crate::sir::ModuleErrors;
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum CompileError {
-    #[error("function is invalid")]
+    #[error("module is invalid")]
     #[diagnostic(code(wasm::invalid_function))]
-    Invalid(#[from] VerifyErrors),
-
-    #[error("calls are not supported yet")]
-    #[diagnostic(code(wasm::call))]
-    Call,
+    Invalid(#[from] ModuleErrors),
 
     #[error("failed to print wat: {0}")]
     #[diagnostic(code(wasm::print))]
