@@ -1,0 +1,15 @@
+; test wasm
+; check: (type (;0;) (func (param i64 i64) (result i64)))
+; check: (export "add" (func $$add))
+; check: (func $$add (;0;) (type 0) (param $$v0 i64) (param $$v1 i64) (result i64)
+; nextln:   (local $$v2 i64)
+; nextln:   local.get $$v0
+; nextln:   local.get $$v1
+; nextln:   i64.add
+; nextln:   local.set $$v2
+; nextln:   local.get $$v2
+function %add(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    return v2
+}

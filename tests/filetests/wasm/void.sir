@@ -1,0 +1,7 @@
+; test wasm
+; check: (type (;0;) (func))
+; check: (func $$nop
+function %nop() {
+block0:
+    return
+}

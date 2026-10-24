@@ -1,0 +1,18 @@
+; test wasm
+; check: (func $$sum
+; check: i64.const 10
+; nextln: local.set $$v0
+; nextln: i64.const -20
+; nextln: local.set $$v1
+; nextln: local.get $$v0
+; nextln: local.get $$v1
+; nextln: i64.add
+; nextln: local.set $$v2
+; nextln: local.get $$v2
+function %sum() -> i64 {
+block0:
+    v0 = iconst 10
+    v1 = iconst -20
+    v2 = iadd v0, v1
+    return v2
+}

@@ -6,7 +6,7 @@ use libtest_mimic::{Arguments, Failed, Trial};
 use miette::{Diagnostic, NarratableReportHandler};
 use sbe::sir::{Function, ParseError, parse_function, verify};
 use sbe::sopt::PassManager;
-use sbe::x86_64;
+use sbe::{wasm, x86_64};
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/filetests");
 
@@ -95,6 +95,15 @@ fn run_stage(stage: &str, path: &Path, source: &str) -> Result<String, Failed> {
             Ok(format!("{}\n", hex.join(" ")))
         }
         "x86_64-error" => match x86_64::compile(&verified(parsed)?) {
+            Ok(_) => Err("expected a compile error".into()),
+            Err(err) => Ok(render_string(&err)),
+        },
+        "wasm" => {
+            let compiled = wasm::compile(&verified(parsed)?).map_err(render)?;
+            wasmparser::validate(&compiled.code).map_err(|e| format!("invalid wasm: {e}"))?;
+            Ok(compiled.wat)
+        }
+        "wasm-error" => match wasm::compile(&verified(parsed)?) {
             Ok(_) => Err("expected a compile error".into()),
             Err(err) => Ok(render_string(&err)),
         },
