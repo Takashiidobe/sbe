@@ -1,4 +1,6 @@
-use super::ast::{BlockAst, CalleeAst, FunctionAst, InstAst, Name, Op, Param, TargetAst, TermAst};
+use super::ast::{
+    BlockAst, CalleeAst, FunctionAst, ImportAst, InstAst, Item, Name, Op, Param, TargetAst, TermAst,
+};
 use super::error::{Failure, PResult, ParseErrorKind};
 use super::lexer::{Token, TokenKind};
 use crate::sir::{BinOp, CvtOp, IntCC, Type, UnOp};
@@ -23,17 +25,7 @@ impl<'a> Parser<'a> {
         if kw.text(self.src) != "function" {
             return Err(self.expected_at("`function`", kw));
         }
-        let name_tok = self.expect(TokenKind::FuncName)?;
-        let name = &name_tok.text(self.src)[1..];
-
-        self.expect(TokenKind::LParen)?;
-        let params = self.types(true)?;
-        self.expect(TokenKind::RParen)?;
-        let returns = if self.eat(TokenKind::Arrow) {
-            self.types(false)?
-        } else {
-            Vec::new()
-        };
+        let (name, params, returns) = self.signature()?;
 
         self.expect(TokenKind::LBrace)?;
         let mut callees = Vec::new();
@@ -48,7 +40,6 @@ impl<'a> Parser<'a> {
             blocks.push(self.block()?);
         }
         let end = self.expect(TokenKind::RBrace)?;
-        self.expect(TokenKind::Eof)?;
 
         Ok(FunctionAst {
             name,
@@ -60,9 +51,38 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn callee(&mut self) -> PResult<CalleeAst<'a>> {
-        let alias = self.name()?;
-        self.expect(TokenKind::Equals)?;
+    pub fn single_function(&mut self) -> PResult<FunctionAst<'a>> {
+        let ast = self.function()?;
+        self.expect(TokenKind::Eof)?;
+        Ok(ast)
+    }
+
+    pub fn module(&mut self) -> PResult<Vec<Item<'a>>> {
+        let mut items = Vec::new();
+        while self.peek().kind != TokenKind::Eof {
+            let kw = self.peek();
+            items.push(
+                if kw.kind == TokenKind::Ident && kw.text(self.src) == "import" {
+                    self.advance();
+                    Item::Import(self.import()?)
+                } else {
+                    Item::Function(self.function()?)
+                },
+            );
+        }
+        Ok(items)
+    }
+
+    fn import(&mut self) -> PResult<ImportAst<'a>> {
+        let (name, params, returns) = self.signature()?;
+        Ok(ImportAst {
+            name,
+            params,
+            returns,
+        })
+    }
+
+    fn signature(&mut self) -> PResult<(&'a str, Vec<Type>, Vec<Type>)> {
         let name_tok = self.expect(TokenKind::FuncName)?;
         self.expect(TokenKind::LParen)?;
         let params = self.types(true)?;
@@ -72,9 +92,16 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
+        Ok((&name_tok.text(self.src)[1..], params, returns))
+    }
+
+    fn callee(&mut self) -> PResult<CalleeAst<'a>> {
+        let alias = self.name()?;
+        self.expect(TokenKind::Equals)?;
+        let (name, params, returns) = self.signature()?;
         Ok(CalleeAst {
             alias,
-            name: &name_tok.text(self.src)[1..],
+            name,
             params,
             returns,
         })

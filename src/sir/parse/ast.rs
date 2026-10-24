@@ -61,3 +61,14 @@ pub(super) struct FunctionAst<'a> {
     pub blocks: Vec<BlockAst<'a>>,
     pub end_span: SourceSpan,
 }
+
+pub(super) struct ImportAst<'a> {
+    pub name: &'a str,
+    pub params: Vec<Type>,
+    pub returns: Vec<Type>,
+}
+
+pub(super) enum Item<'a> {
+    Import(ImportAst<'a>),
+    Function(FunctionAst<'a>),
+}

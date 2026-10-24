@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use super::{Block, FuncRef, Function, InstData, Signature, Terminator, Value};
+use super::{Block, FuncRef, Function, Import, InstData, Module, Signature, Terminator, Value};
 
 fn write_values(f: &mut Formatter<'_>, values: &[Value]) -> fmt::Result {
     for (i, value) in values.iter().enumerate() {
@@ -134,5 +134,27 @@ impl Display for Function {
         }
 
         f.write_str("}\n")
+    }
+}
+
+impl Display for Import {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str("import ")?;
+        write_signature(f, &self.name, &self.signature)
+    }
+}
+
+impl Display for Module {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for import in self.imports() {
+            writeln!(f, "{import}")?;
+        }
+        for (i, func) in self.functions().iter().enumerate() {
+            if i > 0 || !self.imports().is_empty() {
+                f.write_char('\n')?;
+            }
+            write!(f, "{func}")?;
+        }
+        Ok(())
     }
 }

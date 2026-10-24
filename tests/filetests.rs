@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use filecheck::{CheckerBuilder, NO_VARIABLES};
 use libtest_mimic::{Arguments, Failed, Trial};
 use miette::{Diagnostic, NarratableReportHandler};
-use sbe::sir::{Function, ParseError, parse_function, verify};
+use sbe::sir::{Function, ParseError, parse_function, parse_module, verify, verify_module};
 use sbe::sopt::PassManager;
 use sbe::{wasm, x86_64};
 
@@ -79,6 +79,27 @@ fn stage_of(source: &str) -> Result<String, Failed> {
 
 fn run_stage(stage: &str, path: &Path, source: &str) -> Result<String, Failed> {
     let name = path.file_name().unwrap().to_string_lossy();
+    match stage {
+        "module-print" => {
+            let module = parse_module(&name, source).map_err(render)?;
+            verify_module(&module).map_err(render)?;
+            return Ok(module.to_string());
+        }
+        "module-verify" => {
+            let module = parse_module(&name, source).map_err(render)?;
+            return Ok(match verify_module(&module) {
+                Ok(()) => "ok\n".to_owned(),
+                Err(errors) => render_string(&errors),
+            });
+        }
+        "module-parse-error" => {
+            return match parse_module(&name, source) {
+                Ok(_) => Err("expected a parse error".into()),
+                Err(err) => Ok(render_string(&err)),
+            };
+        }
+        _ => {}
+    }
     let parsed = parse_function(&name, source);
     match stage {
         "print" => {
