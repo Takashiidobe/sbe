@@ -1,0 +1,9 @@
+; test verify
+; check: inst0 calls fn0, which returns more than one value
+function %f() {
+    fn0 = %g() -> i64, i64
+
+block0:
+    v0 = call fn0()
+    return
+}

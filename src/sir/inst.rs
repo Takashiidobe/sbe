@@ -1,4 +1,4 @@
-use super::{Block, Type, Value};
+use super::{Block, FuncRef, Type, Value};
 
 /// binary ops take two operands of one integer type and yield that type. shift amounts are taken
 /// modulo the type's width. `sdiv`, `udiv`, `srem` and `urem` trap on a zero divisor. the signed
@@ -190,11 +190,22 @@ pub enum InstData {
     Select {
         args: [Value; 3],
     },
+    /// calls a function declared on this function; it yields a value only when the callee returns
+    /// one, and callees return at most one value
+    Call {
+        callee: FuncRef,
+        args: Vec<Value>,
+    },
 }
 
 impl InstData {
-    pub fn result_type(&self, type_of: impl Fn(Value) -> Type) -> Type {
-        match self {
+    /// `None` for a call to a callee that returns nothing
+    pub fn result_type(
+        &self,
+        type_of: impl Fn(Value) -> Type,
+        callee_return: impl Fn(FuncRef) -> Option<Type>,
+    ) -> Option<Type> {
+        Some(match self {
             InstData::Iconst { ty, .. } | InstData::Convert { ty, .. } => *ty,
             InstData::Unary { arg, .. } => type_of(*arg),
             InstData::Binary { args: [a, _], .. } => type_of(*a),
@@ -202,7 +213,8 @@ impl InstData {
             InstData::Select {
                 args: [_, then_value, _],
             } => type_of(*then_value),
-        }
+            InstData::Call { callee, .. } => return callee_return(*callee),
+        })
     }
 
     pub fn args(&self) -> &[Value] {
@@ -213,6 +225,7 @@ impl InstData {
             }
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => args,
             InstData::Select { args } => args,
+            InstData::Call { args, .. } => args,
         }
     }
 }

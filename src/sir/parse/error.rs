@@ -33,6 +33,15 @@ pub enum ParseErrorKind {
     #[error("value `{0}` is not defined")]
     UndefinedValue(String),
 
+    #[error("function `{0}` is declared more than once")]
+    DuplicateCallee(String),
+
+    #[error("function `{0}` is not declared")]
+    UndefinedCallee(String),
+
+    #[error("call to `{0}` {1}")]
+    CallResult(String, &'static str),
+
     #[error("entry block params do not match the function signature")]
     EntryParams,
 

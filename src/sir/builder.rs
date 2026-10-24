@@ -2,8 +2,8 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    BinOp, Block, CvtOp, Function, InstData, IntCC, Signature, Terminator, Type, UnOp, Value,
-    VerifyErrors, verify::verify,
+    BinOp, Block, CvtOp, FuncRef, Function, InstData, IntCC, Signature, Terminator, Type, UnOp,
+    Value, VerifyErrors, verify::verify,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Diagnostic)]
@@ -22,6 +22,10 @@ pub enum BuilderError {
         help("values come from instruction results or block params of this builder")
     )]
     UnknownValue(Value),
+
+    #[error("{0} is not declared in this function")]
+    #[diagnostic(code(sir::builder::unknown_callee))]
+    UnknownCallee(FuncRef),
 
     #[error("{0} is already terminated")]
     #[diagnostic(code(sir::builder::block_terminated))]
@@ -43,6 +47,10 @@ impl FunctionBuilder {
 
     pub fn entry_block(&self) -> Block {
         self.func.entry_block()
+    }
+
+    pub fn declare_callee(&mut self, name: impl Into<String>, signature: Signature) -> FuncRef {
+        self.func.declare_callee(name, signature)
     }
 
     pub fn create_block(&mut self) -> Block {
@@ -107,6 +115,16 @@ impl FunctionBuilder {
         self.check_value(a)?;
         self.check_value(b)?;
         self.emit(InstData::Binary { op, args: [a, b] })
+    }
+
+    /// the result is `None` when the callee returns nothing
+    pub fn call(&mut self, callee: FuncRef, args: &[Value]) -> Result<Option<Value>, BuilderError> {
+        if !self.func.contains_callee(callee) {
+            return Err(BuilderError::UnknownCallee(callee));
+        }
+        args.iter().try_for_each(|&v| self.check_value(v))?;
+        let block = self.open_block()?;
+        Ok(self.func.push_call(block, callee, args.to_vec()))
     }
 
     pub fn iadd(&mut self, a: Value, b: Value) -> Result<Value, BuilderError> {

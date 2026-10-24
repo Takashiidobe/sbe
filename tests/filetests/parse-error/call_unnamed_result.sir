@@ -1,0 +1,9 @@
+; test parse-error
+; check: call to `fn0` returns a value that must be named
+function %f() {
+    fn0 = %g() -> i64
+
+block0:
+    call fn0()
+    return
+}

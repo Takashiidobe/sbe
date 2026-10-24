@@ -103,3 +103,43 @@ fn finish_rejects_unterminated_blocks() {
     assert_eq!(err.errors.len(), 1);
     assert_eq!(err.to_string(), "function %f failed verification");
 }
+
+#[test]
+fn builds_calls_to_declared_callees() {
+    let mut builder = FunctionBuilder::new("f", i64_sig(1, 1));
+    let double = builder.declare_callee("double", i64_sig(1, 1));
+    let log = builder.declare_callee("log", i64_sig(1, 0));
+    let entry = builder.entry_block();
+    builder.switch_to_block(entry).unwrap();
+
+    let x = builder.block_params(entry).unwrap()[0];
+    let doubled = builder.call(double, &[x]).unwrap().unwrap();
+    assert_eq!(builder.call(log, &[doubled]).unwrap(), None);
+    builder.ret(doubled).unwrap();
+
+    let func = builder.finish().unwrap();
+    assert_eq!(
+        func.to_string(),
+        "function %f(i64) -> i64 {\n    \
+         fn0 = %double(i64) -> i64\n    \
+         fn1 = %log(i64)\n\n\
+         block0(v0: i64):\n    \
+         v1 = call fn0(v0)\n    \
+         call fn1(v1)\n    \
+         return v1\n\
+         }\n"
+    );
+}
+
+#[test]
+fn rejects_calls_to_undeclared_callees() {
+    let mut other = FunctionBuilder::new("other", i64_sig(0, 0));
+    let foreign = other.declare_callee("g", i64_sig(0, 0));
+
+    let mut builder = FunctionBuilder::new("f", i64_sig(0, 0));
+    builder.switch_to_block(builder.entry_block()).unwrap();
+    assert_eq!(
+        builder.call(foreign, &[]),
+        Err(BuilderError::UnknownCallee(foreign))
+    );
+}

@@ -2,17 +2,25 @@ use std::collections::HashMap;
 
 use super::ast::{FunctionAst, Name, Op, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
-use crate::sir::{Block, Function, InstData, Signature, Terminator, Value};
+use crate::sir::{Block, FuncRef, Function, InstData, Signature, Terminator, Value};
 
 struct Names<'a> {
     values: HashMap<&'a str, Value>,
     blocks: HashMap<&'a str, Block>,
+    callees: HashMap<&'a str, FuncRef>,
 }
 
 impl<'a> Names<'a> {
     fn value(&self, name: Name<'a>) -> PResult<Value> {
         self.values.get(name.text).copied().ok_or(Failure {
             kind: ParseErrorKind::UndefinedValue(name.text.to_owned()),
+            span: name.span,
+        })
+    }
+
+    fn callee(&self, name: Name<'a>) -> PResult<FuncRef> {
+        self.callees.get(name.text).copied().ok_or(Failure {
+            kind: ParseErrorKind::UndefinedCallee(name.text.to_owned()),
             span: name.span,
         })
     }
@@ -69,7 +77,23 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
     let mut names = Names {
         values: HashMap::new(),
         blocks: HashMap::new(),
+        callees: HashMap::new(),
     };
+    for callee in &ast.callees {
+        let id = func.declare_callee(
+            callee.name,
+            Signature {
+                params: callee.params.clone(),
+                returns: callee.returns.clone(),
+            },
+        );
+        if names.callees.insert(callee.alias.text, id).is_some() {
+            return Err(Failure {
+                kind: ParseErrorKind::DuplicateCallee(callee.alias.text.to_owned()),
+                span: callee.alias.span,
+            });
+        }
+    }
     let mut next_value = func.num_values();
 
     for (i, block) in ast.blocks.iter().enumerate() {
@@ -95,8 +119,10 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
             insert_value(&mut names, param.name, value)?;
         }
         for inst in &block.insts {
-            next_value += 1;
-            insert_value(&mut names, inst.result, Value::from_index(next_value - 1))?;
+            if let Some(result) = inst.result {
+                next_value += 1;
+                insert_value(&mut names, result, Value::from_index(next_value - 1))?;
+            }
         }
     }
 
@@ -138,9 +164,27 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
                     op: *op,
                     args: [names.value(*a)?, names.value(*b)?],
                 },
+                Op::Call(callee_name, args) => {
+                    let callee = names.callee(*callee_name)?;
+                    let returns = !func.callee(callee).signature.returns.is_empty();
+                    let problem = match (returns, inst.result) {
+                        (true, None) => Some("returns a value that must be named"),
+                        (false, Some(_)) => Some("returns nothing"),
+                        _ => None,
+                    };
+                    if let Some(problem) = problem {
+                        return Err(Failure {
+                            kind: ParseErrorKind::CallResult(callee_name.text.to_owned(), problem),
+                            span: callee_name.span,
+                        });
+                    }
+                    let args = names.values(args)?;
+                    func.push_call(id, callee, args);
+                    continue;
+                }
             };
             let value = func.push_inst(id, data);
-            debug_assert_eq!(names.values[inst.result.text], value);
+            debug_assert_eq!(names.values[inst.result.expect("not a call").text], value);
         }
         let terminator = match &block.terminator {
             Some(TermAst::Return(values)) => Terminator::Return {

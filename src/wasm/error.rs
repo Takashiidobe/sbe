@@ -9,6 +9,10 @@ pub enum CompileError {
     #[diagnostic(code(wasm::invalid_function))]
     Invalid(#[from] VerifyErrors),
 
+    #[error("calls are not supported yet")]
+    #[diagnostic(code(wasm::call))]
+    Call,
+
     #[error("failed to print wat: {0}")]
     #[diagnostic(code(wasm::print))]
     Print(String),

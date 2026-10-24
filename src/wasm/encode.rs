@@ -195,7 +195,7 @@ impl Emitter<'_> {
 
     fn emit_insts(&mut self, block: Block) {
         for &inst in self.func.block(block).insts() {
-            let result = self.local_of[self.func.inst_result(inst).index()];
+            let result = self.local_of[self.func.inst_result(inst).map_or(0, |v| v.index())];
             match self.func.inst(inst) {
                 InstData::Iconst {
                     ty: Type::I64,
@@ -240,6 +240,7 @@ impl Emitter<'_> {
                 InstData::Binary { op, args: [a, b] } => {
                     self.emit_binary(*op, self.ty(*a), *a, *b);
                 }
+                InstData::Call { .. } => unreachable!("rejected in compile"),
             }
             self.op(Instruction::LocalSet(result));
         }
@@ -412,6 +413,9 @@ impl Emitter<'_> {
 /// every sir value lives in its own wasm local; params are the first locals
 pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
     verify(func)?;
+    if !func.callees().is_empty() {
+        return Err(CompileError::Call);
+    }
 
     let cfg = ControlFlow::compute(func);
     let mut local_values: Vec<Value> = Vec::new();
@@ -426,7 +430,8 @@ pub fn compile(func: &Function) -> Result<Compiled, CompileError> {
         data.params().iter().for_each(|&p| define(p));
         data.insts()
             .iter()
-            .for_each(|&inst| define(func.inst_result(inst)));
+            .filter_map(|&inst| func.inst_result(inst))
+            .for_each(&mut define);
     }
 
     let mut dom_children = vec![Vec::new(); func.blocks().count()];

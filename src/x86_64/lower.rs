@@ -137,6 +137,10 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         return Err(CompileError::TooManyReturns(signature.returns.len()));
     }
 
+    if !func.callees().is_empty() {
+        return Err(CompileError::Call);
+    }
+
     let cfg = ControlFlow::compute(func);
     let order = cfg.reverse_postorder();
     let layout = Layout::new(func, order);
@@ -157,7 +161,7 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
         }
 
         for &inst in data.insts() {
-            let result = vreg(func.inst_result(inst));
+            let result = vreg(func.inst_result(inst).unwrap_or(Value::from_index(0)));
             match func.inst(inst) {
                 InstData::Iconst { value, .. } => insts.push(Inst::MovImm {
                     dst: result,
@@ -214,6 +218,7 @@ pub fn lower(func: &Function) -> Result<VCode<Reg>, CompileError> {
                         src: vreg(*arg),
                     }),
                 },
+                InstData::Call { .. } => unreachable!("rejected above"),
                 InstData::Binary { op, args: [a, b] } => {
                     let ty = func.value_type(*a);
                     let signed = matches!(op, BinOp::Sshr | BinOp::Sdiv | BinOp::Srem);

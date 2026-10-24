@@ -1,9 +1,16 @@
-use super::{Block, Inst, InstData, Terminator, Type, Value};
+use super::{Block, FuncRef, Inst, InstData, Terminator, Type, Value};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Signature {
     pub params: Vec<Type>,
     pub returns: Vec<Type>,
+}
+
+/// a function this function calls, declared by name and signature only
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Callee {
+    pub name: String,
+    pub signature: Signature,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,13 +49,14 @@ struct ValueEntry {
 #[derive(Clone, Debug)]
 struct InstEntry {
     data: InstData,
-    result: Value,
+    result: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Function {
     name: String,
     signature: Signature,
+    callees: Vec<Callee>,
     blocks: Vec<BlockData>,
     insts: Vec<InstEntry>,
     values: Vec<ValueEntry>,
@@ -60,6 +68,7 @@ impl Function {
         let mut func = Self {
             name: name.into(),
             signature,
+            callees: Vec::new(),
             blocks: Vec::new(),
             insts: Vec::new(),
             values: Vec::new(),
@@ -95,11 +104,40 @@ impl Function {
         value
     }
 
+    pub fn declare_callee(&mut self, name: impl Into<String>, signature: Signature) -> FuncRef {
+        self.callees.push(Callee {
+            name: name.into(),
+            signature,
+        });
+        FuncRef::from_index(self.callees.len() - 1)
+    }
+
+    /// appends an instruction that yields a value; calls go through [`Function::push_call`]
     pub fn push_inst(&mut self, block: Block, data: InstData) -> Value {
+        assert!(
+            !matches!(data, InstData::Call { .. }),
+            "calls may not yield a value; use push_call"
+        );
+        self.insert_inst(block, data)
+            .expect("non-call instructions yield a value")
+    }
+
+    pub fn push_call(&mut self, block: Block, callee: FuncRef, args: Vec<Value>) -> Option<Value> {
+        self.insert_inst(block, InstData::Call { callee, args })
+    }
+
+    fn insert_inst(&mut self, block: Block, data: InstData) -> Option<Value> {
         let inst = Inst::from_index(self.insts.len());
         // a forward reference has no type yet; the verifier reports it, so any guess will do
-        let ty = data.result_type(|v| self.values.get(v.index()).map_or(Type::I64, |e| e.ty));
-        let result = self.new_value(ty, ValueDef::Result(inst));
+        let ty = data.result_type(
+            |v| self.values.get(v.index()).map_or(Type::I64, |e| e.ty),
+            |f| {
+                self.callees
+                    .get(f.index())
+                    .and_then(|c| c.signature.returns.first().copied())
+            },
+        );
+        let result = ty.map(|ty| self.new_value(ty, ValueDef::Result(inst)));
         self.insts.push(InstEntry { data, result });
         self.blocks[block.index()].insts.push(inst);
         result
@@ -121,7 +159,7 @@ impl Function {
         &self.insts[inst.index()].data
     }
 
-    pub fn inst_result(&self, inst: Inst) -> Value {
+    pub fn inst_result(&self, inst: Inst) -> Option<Value> {
         self.insts[inst.index()].result
     }
 
@@ -139,6 +177,18 @@ impl Function {
 
     pub fn num_insts(&self) -> usize {
         self.insts.len()
+    }
+
+    pub fn callees(&self) -> &[Callee] {
+        &self.callees
+    }
+
+    pub fn callee(&self, callee: FuncRef) -> &Callee {
+        &self.callees[callee.index()]
+    }
+
+    pub fn contains_callee(&self, callee: FuncRef) -> bool {
+        callee.index() < self.callees.len()
     }
 
     pub fn contains_block(&self, block: Block) -> bool {

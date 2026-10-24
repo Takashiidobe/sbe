@@ -1,0 +1,10 @@
+; test verify
+; check: inst1 uses v1 of type i8, expected i64
+function %f(i64) {
+    fn0 = %g(i64)
+
+block0(v0: i64):
+    v1 = icmp eq v0, v0
+    call fn0(v1)
+    return
+}

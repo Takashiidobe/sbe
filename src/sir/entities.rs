@@ -26,3 +26,4 @@ macro_rules! entity {
 entity!(Value, "v");
 entity!(Block, "block");
 entity!(Inst, "inst");
+entity!(FuncRef, "fn");

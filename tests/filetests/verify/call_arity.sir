@@ -1,0 +1,9 @@
+; test verify
+; check: inst0 calls fn0 with the wrong number of args
+function %f(i64) {
+    fn0 = %g(i64, i64)
+
+block0(v0: i64):
+    call fn0(v0)
+    return
+}

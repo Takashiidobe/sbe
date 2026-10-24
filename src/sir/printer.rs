@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use super::{Block, Function, InstData, Terminator, Value};
+use super::{Block, FuncRef, Function, InstData, Signature, Terminator, Value};
 
 fn write_values(f: &mut Formatter<'_>, values: &[Value]) -> fmt::Result {
     for (i, value) in values.iter().enumerate() {
@@ -32,17 +32,31 @@ fn write_types<T: Display>(f: &mut Formatter<'_>, types: &[T]) -> fmt::Result {
     Ok(())
 }
 
+fn write_signature(f: &mut Formatter<'_>, name: &str, signature: &Signature) -> fmt::Result {
+    write!(f, "%{name}(")?;
+    write_types(f, &signature.params)?;
+    f.write_char(')')?;
+    if !signature.returns.is_empty() {
+        f.write_str(" -> ")?;
+        write_types(f, &signature.returns)?;
+    }
+    Ok(())
+}
+
 impl Display for Function {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let signature = self.signature();
-        write!(f, "function %{}(", self.name())?;
-        write_types(f, &signature.params)?;
-        f.write_char(')')?;
-        if !signature.returns.is_empty() {
-            f.write_str(" -> ")?;
-            write_types(f, &signature.returns)?;
-        }
+        f.write_str("function ")?;
+        write_signature(f, self.name(), self.signature())?;
         f.write_str(" {\n")?;
+
+        for (i, callee) in self.callees().iter().enumerate() {
+            write!(f, "    {} = ", FuncRef::from_index(i))?;
+            write_signature(f, &callee.name, &callee.signature)?;
+            f.write_char('\n')?;
+        }
+        if !self.callees().is_empty() {
+            f.write_char('\n')?;
+        }
 
         for (i, block) in self.blocks().enumerate() {
             if i > 0 {
@@ -63,7 +77,10 @@ impl Display for Function {
             f.write_str(":\n")?;
 
             for &inst in data.insts() {
-                write!(f, "    {} = ", self.inst_result(inst))?;
+                f.write_str("    ")?;
+                if let Some(result) = self.inst_result(inst) {
+                    write!(f, "{result} = ")?;
+                }
                 match self.inst(inst) {
                     InstData::Iconst { ty, value } => writeln!(f, "iconst {ty} {value}")?,
                     InstData::Convert { op, ty, arg } => {
@@ -76,6 +93,11 @@ impl Display for Function {
                     InstData::Unary { op, arg } => writeln!(f, "{} {arg}", op.mnemonic())?,
                     InstData::Binary { op, args: [a, b] } => {
                         writeln!(f, "{} {a}, {b}", op.mnemonic())?
+                    }
+                    InstData::Call { callee, args } => {
+                        write!(f, "call {callee}(")?;
+                        write_values(f, args)?;
+                        writeln!(f, ")")?
                     }
                 }
             }

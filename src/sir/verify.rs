@@ -3,7 +3,9 @@ use std::fmt;
 use miette::Diagnostic;
 use thiserror::Error;
 
-use super::{Block, ControlFlow, Function, Inst, InstData, Terminator, Type, Value, ValueDef};
+use super::{
+    Block, ControlFlow, FuncRef, Function, Inst, InstData, Terminator, Type, Value, ValueDef,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Use {
@@ -59,6 +61,21 @@ pub enum VerifyError {
         from: Type,
         to: Type,
     },
+
+    #[error("{user} calls {callee}, which is not declared in this function")]
+    #[diagnostic(code(sir::verify::unknown_callee))]
+    UnknownCallee { user: Use, callee: FuncRef },
+
+    #[error("{user} calls {callee} with the wrong number of args")]
+    #[diagnostic(code(sir::verify::call_arity))]
+    CallArity { user: Use, callee: FuncRef },
+
+    #[error("{user} calls {callee}, which returns more than one value")]
+    #[diagnostic(
+        code(sir::verify::call_returns),
+        help("calls to functions with several return values are not supported")
+    )]
+    CallReturns { user: Use, callee: FuncRef },
 
     #[error("{0} returns the wrong number of values for the signature")]
     #[diagnostic(code(sir::verify::return_arity))]
@@ -189,6 +206,25 @@ impl Verifier<'_> {
                 self.check_arg(user, *cond, Type::I8);
                 self.check_same_type(user, *then_value, *else_value);
             }
+            InstData::Call { callee, args } => self.check_call(user, *callee, args),
+        }
+    }
+
+    fn check_call(&mut self, user: Use, callee: FuncRef, args: &[Value]) {
+        if !self.func.contains_callee(callee) {
+            self.errors
+                .push(VerifyError::UnknownCallee { user, callee });
+            return;
+        }
+        let signature = &self.func.callee(callee).signature;
+        if signature.returns.len() > 1 {
+            self.errors.push(VerifyError::CallReturns { user, callee });
+        }
+        if args.len() != signature.params.len() {
+            self.errors.push(VerifyError::CallArity { user, callee });
+        }
+        for (&arg, &ty) in args.iter().zip(&signature.params) {
+            self.check_arg(user, arg, ty);
         }
     }
 

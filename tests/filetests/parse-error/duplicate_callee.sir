@@ -1,0 +1,9 @@
+; test parse-error
+; check: function `fn0` is declared more than once
+function %f() {
+    fn0 = %g()
+    fn0 = %h()
+
+block0:
+    return
+}

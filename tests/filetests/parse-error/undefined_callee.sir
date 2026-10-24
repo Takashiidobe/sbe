@@ -1,0 +1,7 @@
+; test parse-error
+; check: function `fn3` is not declared
+function %f() {
+block0:
+    call fn3()
+    return
+}

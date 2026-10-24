@@ -1,4 +1,4 @@
-use super::ast::{BlockAst, FunctionAst, InstAst, Name, Op, Param, TargetAst, TermAst};
+use super::ast::{BlockAst, CalleeAst, FunctionAst, InstAst, Name, Op, Param, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
 use super::lexer::{Token, TokenKind};
 use crate::sir::{BinOp, CvtOp, IntCC, Type, UnOp};
@@ -36,6 +36,13 @@ impl<'a> Parser<'a> {
         };
 
         self.expect(TokenKind::LBrace)?;
+        let mut callees = Vec::new();
+        while self.peek().kind == TokenKind::Ident
+            && self.peek_at(1).kind == TokenKind::Equals
+            && self.peek_at(2).kind == TokenKind::FuncName
+        {
+            callees.push(self.callee()?);
+        }
         let mut blocks = Vec::new();
         while !matches!(self.peek().kind, TokenKind::RBrace | TokenKind::Eof) {
             blocks.push(self.block()?);
@@ -45,10 +52,31 @@ impl<'a> Parser<'a> {
 
         Ok(FunctionAst {
             name,
+            callees,
             params,
             returns,
             blocks,
             end_span: end.span(),
+        })
+    }
+
+    fn callee(&mut self) -> PResult<CalleeAst<'a>> {
+        let alias = self.name()?;
+        self.expect(TokenKind::Equals)?;
+        let name_tok = self.expect(TokenKind::FuncName)?;
+        self.expect(TokenKind::LParen)?;
+        let params = self.types(true)?;
+        self.expect(TokenKind::RParen)?;
+        let returns = if self.eat(TokenKind::Arrow) {
+            self.types(false)?
+        } else {
+            Vec::new()
+        };
+        Ok(CalleeAst {
+            alias,
+            name: &name_tok.text(self.src)[1..],
+            params,
+            returns,
         })
     }
 
@@ -123,6 +151,14 @@ impl<'a> Parser<'a> {
                     terminator = Some(TermAst::Brif(cond, then_target, self.target()?));
                     break;
                 }
+                "call" if self.peek_at(1).kind != TokenKind::Equals => {
+                    self.advance();
+                    let (callee, args) = self.call_target()?;
+                    insts.push(InstAst {
+                        result: None,
+                        op: Op::Call(callee, args),
+                    });
+                }
                 _ if self.peek_at(1).kind == TokenKind::Equals => insts.push(self.inst()?),
                 _ => break,
             }
@@ -136,8 +172,24 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn call_target(&mut self) -> PResult<(Name<'a>, Vec<Name<'a>>)> {
+        let callee = self.name()?;
+        self.expect(TokenKind::LParen)?;
+        let mut args = Vec::new();
+        if self.peek().kind != TokenKind::RParen {
+            loop {
+                args.push(self.name()?);
+                if !self.eat(TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        Ok((callee, args))
+    }
+
     fn inst(&mut self) -> PResult<InstAst<'a>> {
-        let result = self.name()?;
+        let result = Some(self.name()?);
         self.expect(TokenKind::Equals)?;
         let op_tok = self.expect(TokenKind::Ident)?;
         let op = match op_tok.text(self.src) {
@@ -161,6 +213,10 @@ impl<'a> Parser<'a> {
                 let a = self.name()?;
                 self.expect(TokenKind::Comma)?;
                 Op::Icmp(cc, a, self.name()?)
+            }
+            "call" => {
+                let (callee, args) = self.call_target()?;
+                Op::Call(callee, args)
             }
             "select" => {
                 let cond = self.name()?;

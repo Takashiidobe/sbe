@@ -17,6 +17,10 @@ pub enum CompileError {
     #[diagnostic(code(x86_64::too_many_returns))]
     TooManyReturns(usize),
 
+    #[error("calls are not supported yet")]
+    #[diagnostic(code(x86_64::call))]
+    Call,
+
     #[error("ran out of registers; spilling is not implemented")]
     #[diagnostic(code(x86_64::out_of_registers))]
     OutOfRegisters,

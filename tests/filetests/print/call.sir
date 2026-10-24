@@ -1,0 +1,19 @@
+; test print
+
+; check: function %f(i64) -> i64 {
+; nextln:     fn0 = %g(i64, i64) -> i64
+; nextln:     fn1 = %log(i64)
+; check: block0(v0: i64):
+; nextln:     v1 = call fn0(v0, v0)
+; nextln:     call fn1(v1)
+; nextln:     return v1
+; nextln: }
+function %f(i64) -> i64 {
+    fn0 = %g(i64, i64) -> i64
+    fn1 = %log(i64)
+
+block0(v0: i64):
+    v1 = call fn0(v0, v0)
+    call fn1(v1)
+    return v1
+}

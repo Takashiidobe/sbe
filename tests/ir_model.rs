@@ -40,7 +40,7 @@ fn instruction_results_are_single_definitions() {
     let [inst] = block.insts() else {
         panic!("expected one inst")
     };
-    let result = func.inst_result(*inst);
+    let result = func.inst_result(*inst).unwrap();
     assert_eq!(func.value_def(result), ValueDef::Result(*inst));
     assert_eq!(func.value_type(result), Type::I64);
     assert_eq!(func.num_values(), 3);

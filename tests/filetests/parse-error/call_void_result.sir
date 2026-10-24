@@ -1,0 +1,9 @@
+; test parse-error
+; check: call to `fn0` returns nothing
+function %f() {
+    fn0 = %g()
+
+block0:
+    v0 = call fn0()
+    return
+}

@@ -20,10 +20,11 @@ pub(super) enum Op<'a> {
     Icmp(IntCC, Name<'a>, Name<'a>),
     Select(Name<'a>, Name<'a>, Name<'a>),
     Binary(BinOp, Name<'a>, Name<'a>),
+    Call(Name<'a>, Vec<Name<'a>>),
 }
 
 pub(super) struct InstAst<'a> {
-    pub result: Name<'a>,
+    pub result: Option<Name<'a>>,
     pub op: Op<'a>,
 }
 
@@ -45,8 +46,16 @@ pub(super) struct BlockAst<'a> {
     pub terminator: Option<TermAst<'a>>,
 }
 
+pub(super) struct CalleeAst<'a> {
+    pub alias: Name<'a>,
+    pub name: &'a str,
+    pub params: Vec<Type>,
+    pub returns: Vec<Type>,
+}
+
 pub(super) struct FunctionAst<'a> {
     pub name: &'a str,
+    pub callees: Vec<CalleeAst<'a>>,
     pub params: Vec<Type>,
     pub returns: Vec<Type>,
     pub blocks: Vec<BlockAst<'a>>,
