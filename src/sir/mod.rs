@@ -1,4 +1,5 @@
 mod builder;
+mod cfg;
 mod entities;
 mod function;
 mod inst;
@@ -8,6 +9,7 @@ mod types;
 mod verify;
 
 pub use builder::{BuilderError, FunctionBuilder};
+pub use cfg::ControlFlow;
 pub use entities::{Block, Inst, Value};
 pub use function::{BlockData, Function, Signature, ValueDef};
 pub use inst::{InstData, Terminator};

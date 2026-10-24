@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use super::{Function, InstData, Terminator, Value};
+use super::{Block, Function, InstData, Terminator, Value};
 
 fn write_values(f: &mut Formatter<'_>, values: &[Value]) -> fmt::Result {
     for (i, value) in values.iter().enumerate() {
@@ -8,6 +8,16 @@ fn write_values(f: &mut Formatter<'_>, values: &[Value]) -> fmt::Result {
             f.write_str(", ")?;
         }
         write!(f, "{value}")?;
+    }
+    Ok(())
+}
+
+fn write_target(f: &mut Formatter<'_>, dest: Block, args: &[Value]) -> fmt::Result {
+    write!(f, "{dest}")?;
+    if !args.is_empty() {
+        f.write_char('(')?;
+        write_values(f, args)?;
+        f.write_char(')')?;
     }
     Ok(())
 }
@@ -70,12 +80,21 @@ impl Display for Function {
                     f.write_char('\n')?;
                 }
                 Some(Terminator::Jump { dest, args }) => {
-                    write!(f, "    jump {dest}")?;
-                    if !args.is_empty() {
-                        f.write_char('(')?;
-                        write_values(f, args)?;
-                        f.write_char(')')?;
-                    }
+                    f.write_str("    jump ")?;
+                    write_target(f, *dest, args)?;
+                    f.write_char('\n')?;
+                }
+                Some(Terminator::Brif {
+                    cond,
+                    then_dest,
+                    then_args,
+                    else_dest,
+                    else_args,
+                }) => {
+                    write!(f, "    brif {cond}, ")?;
+                    write_target(f, *then_dest, then_args)?;
+                    f.write_str(", ")?;
+                    write_target(f, *else_dest, else_args)?;
                     f.write_char('\n')?;
                 }
                 None => {}

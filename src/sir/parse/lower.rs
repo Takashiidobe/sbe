@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::ast::{FunctionAst, Name, Op, TermAst};
+use super::ast::{FunctionAst, Name, Op, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
 use crate::sir::{Block, Function, InstData, Signature, Terminator, Value};
 
@@ -26,6 +26,12 @@ impl<'a> Names<'a> {
             kind: ParseErrorKind::UndefinedBlock(name.text.to_owned()),
             span: name.span,
         })
+    }
+}
+
+impl<'a> Names<'a> {
+    fn target(&self, target: &TargetAst<'a>) -> PResult<(Block, Vec<Value>)> {
+        Ok((self.block(target.dest)?, self.values(&target.args)?))
     }
 }
 
@@ -112,22 +118,28 @@ pub(super) fn lower(ast: FunctionAst<'_>) -> PResult<Function> {
             let value = func.push_inst(id, data);
             debug_assert_eq!(names.values[inst.result.text], value);
         }
-        match &block.terminator {
-            Some(TermAst::Return(values)) => func.set_terminator(
-                id,
-                Terminator::Return {
-                    values: names.values(values)?,
-                },
-            ),
-            Some(TermAst::Jump(dest, args)) => func.set_terminator(
-                id,
-                Terminator::Jump {
-                    dest: names.block(*dest)?,
-                    args: names.values(args)?,
-                },
-            ),
-            None => {}
-        }
+        let terminator = match &block.terminator {
+            Some(TermAst::Return(values)) => Terminator::Return {
+                values: names.values(values)?,
+            },
+            Some(TermAst::Jump(target)) => {
+                let (dest, args) = names.target(target)?;
+                Terminator::Jump { dest, args }
+            }
+            Some(TermAst::Brif(cond, then_target, else_target)) => {
+                let (then_dest, then_args) = names.target(then_target)?;
+                let (else_dest, else_args) = names.target(else_target)?;
+                Terminator::Brif {
+                    cond: names.value(*cond)?,
+                    then_dest,
+                    then_args,
+                    else_dest,
+                    else_args,
+                }
+            }
+            None => continue,
+        };
+        func.set_terminator(id, terminator);
     }
 
     Ok(func)

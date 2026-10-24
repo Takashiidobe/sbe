@@ -1,0 +1,21 @@
+; test wasm
+; check: (func $$count
+; check: loop
+; check: if
+; check: br 1
+; check: else
+; check: return
+function %count(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst 0
+    jump block1(v0, v1)
+
+block1(v2: i64, v3: i64):
+    v4 = iadd v3, v2
+    v5 = iconst -1
+    v6 = iadd v2, v5
+    brif v6, block1(v6, v4), block2(v4)
+
+block2(v7: i64):
+    return v7
+}

@@ -1,4 +1,4 @@
-use super::ast::{BlockAst, FunctionAst, InstAst, Name, Op, Param, TermAst};
+use super::ast::{BlockAst, FunctionAst, InstAst, Name, Op, Param, TargetAst, TermAst};
 use super::error::{Failure, PResult, ParseErrorKind};
 use super::lexer::{Token, TokenKind};
 use crate::sir::Type;
@@ -114,7 +114,16 @@ impl<'a> Parser<'a> {
                 }
                 "jump" => {
                     self.advance();
-                    terminator = Some(self.jump()?);
+                    terminator = Some(TermAst::Jump(self.target()?));
+                    break;
+                }
+                "brif" => {
+                    self.advance();
+                    let cond = self.name()?;
+                    self.expect(TokenKind::Comma)?;
+                    let then_target = self.target()?;
+                    self.expect(TokenKind::Comma)?;
+                    terminator = Some(TermAst::Brif(cond, then_target, self.target()?));
                     break;
                 }
                 _ if self.peek_at(1).kind == TokenKind::Equals => insts.push(self.inst()?),
@@ -174,7 +183,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn jump(&mut self) -> PResult<TermAst<'a>> {
+    fn target(&mut self) -> PResult<TargetAst<'a>> {
         let dest = self.name()?;
         let mut args = Vec::new();
         let next = self.peek();
@@ -190,7 +199,7 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokenKind::RParen)?;
         }
-        Ok(TermAst::Jump(dest, args))
+        Ok(TargetAst { dest, args })
     }
 
     fn peek(&self) -> Token {

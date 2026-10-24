@@ -1,5 +1,7 @@
 #![cfg(all(target_arch = "x86_64", unix))]
 
+mod common;
+
 use memmap2::MmapMut;
 use sbe::sir::{FunctionBuilder, Signature, Type, parse_function};
 use sbe::x86_64::compile;
@@ -79,4 +81,101 @@ fn unused_and_reordered_params() {
     );
     let f: extern "C" fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
     assert_eq!(f(1000, 20, 3), 23);
+}
+
+#[test]
+fn counting_loop() {
+    let map = compile_text(common::SUM_TO);
+    let f: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    for n in [1, 2, 10, 1000] {
+        assert_eq!(f(n), common::sum_to(n));
+    }
+}
+
+#[test]
+fn loop_carried_values_move_in_parallel() {
+    let map = compile_text(common::FIB);
+    let f: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    for n in 1..=40 {
+        assert_eq!(f(n), common::fib(n));
+    }
+}
+
+#[test]
+fn swapping_params_needs_a_cycle_break() {
+    let map = compile_text(common::SWAP_N);
+    let f: extern "C" fn(i64, i64, i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    for n in 1..=5 {
+        assert_eq!(f(n, 100, 200), common::swap_n(n, 100, 200));
+    }
+}
+
+#[test]
+fn both_branch_edges_move_params() {
+    let map = compile_text(common::BOTH_EDGES_MOVE);
+    let f: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    assert_eq!(f(5, 7), 7);
+    assert_eq!(f(0, 7), 0);
+}
+
+#[test]
+fn nested_loops_keep_outer_values_live() {
+    let map = compile_text(common::NESTED_LOOPS);
+    let f: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    for (n, m) in [(1, 1), (3, 4), (7, 5), (20, 30)] {
+        assert_eq!(f(n, m), n * m);
+    }
+}
+
+#[test]
+fn irreducible_control_flow() {
+    let map = compile_text(common::IRREDUCIBLE);
+    let f: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    for entry in [0, 1] {
+        for n in 1..=9 {
+            assert_eq!(f(entry, n), common::irreducible(entry, n));
+        }
+    }
+}
+
+#[test]
+fn unreachable_blocks_are_dropped() {
+    let map = compile_text(common::UNREACHABLE_BLOCK);
+    let f: extern "C" fn() -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    assert_eq!(f(), 7);
+}
+
+#[test]
+fn builder_diamond() {
+    let signature = Signature {
+        params: vec![Type::I64],
+        returns: vec![Type::I64],
+    };
+    let mut builder = FunctionBuilder::new("pick", signature);
+    let entry = builder.entry_block();
+    let (then_block, else_block, merge) = (
+        builder.create_block(),
+        builder.create_block(),
+        builder.create_block(),
+    );
+    let result = builder.append_block_param(merge, Type::I64).unwrap();
+    let cond = builder.block_params(entry).unwrap()[0];
+
+    builder.switch_to_block(entry).unwrap();
+    builder
+        .brif(cond, then_block, &[], else_block, &[])
+        .unwrap();
+    builder.switch_to_block(then_block).unwrap();
+    let ten = builder.iconst(10).unwrap();
+    builder.jump(merge, &[ten]).unwrap();
+    builder.switch_to_block(else_block).unwrap();
+    let twenty = builder.iconst(20).unwrap();
+    builder.jump(merge, &[twenty]).unwrap();
+    builder.switch_to_block(merge).unwrap();
+    builder.ret(result).unwrap();
+
+    let map = load(&compile(&builder.finish().unwrap()).unwrap().code);
+    let f: extern "C" fn(i64) -> i64 = unsafe { std::mem::transmute(map.as_ptr()) };
+    assert_eq!(f(1), 10);
+    assert_eq!(f(0), 20);
 }

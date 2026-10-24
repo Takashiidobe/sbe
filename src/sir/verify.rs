@@ -3,7 +3,7 @@ use std::fmt;
 use miette::Diagnostic;
 use thiserror::Error;
 
-use super::{Block, Function, Inst, Terminator, Type, Value, ValueDef};
+use super::{Block, ControlFlow, Function, Inst, Terminator, Type, Value, ValueDef};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Use {
@@ -134,29 +134,33 @@ impl Verifier<'_> {
                         self.check_arg(Use::Terminator(block), value, ty);
                     }
                 }
-                Terminator::Jump { dest, args } => {
-                    if !func.contains_block(*dest) {
-                        self.errors.push(VerifyError::UnknownBlock {
-                            from: block,
-                            dest: *dest,
-                        });
-                        continue;
+                Terminator::Jump { .. } | Terminator::Brif { .. } => {
+                    if let Terminator::Brif { cond, .. } = terminator {
+                        self.check_arg(Use::Terminator(block), *cond, Type::I64);
                     }
-                    if *dest == func.entry_block() {
-                        self.errors.push(VerifyError::JumpToEntry { from: block });
-                    }
-                    let params = func.block(*dest).params();
-                    if args.len() != params.len() {
-                        self.errors.push(VerifyError::JumpArity {
-                            from: block,
-                            dest: *dest,
-                        });
-                    }
-                    for (&arg, &param) in args.iter().zip(params) {
-                        self.check_arg(Use::Terminator(block), arg, func.value_type(param));
+                    for (dest, args) in terminator.targets() {
+                        self.check_edge(block, dest, args);
                     }
                 }
             }
+        }
+    }
+
+    fn check_edge(&mut self, from: Block, dest: Block, args: &[Value]) {
+        let func = self.func;
+        if !func.contains_block(dest) {
+            self.errors.push(VerifyError::UnknownBlock { from, dest });
+            return;
+        }
+        if dest == func.entry_block() {
+            self.errors.push(VerifyError::JumpToEntry { from });
+        }
+        let params = func.block(dest).params();
+        if args.len() != params.len() {
+            self.errors.push(VerifyError::JumpArity { from, dest });
+        }
+        for (&arg, &param) in args.iter().zip(params) {
+            self.check_arg(Use::Terminator(from), arg, func.value_type(param));
         }
     }
 
@@ -178,7 +182,7 @@ impl Verifier<'_> {
 
     fn check_dominance(&mut self) {
         let func = self.func;
-        let doms = Dominators::compute(func);
+        let doms = ControlFlow::compute(func);
 
         let mut inst_pos = vec![None; func.num_insts()];
         for block in func.blocks() {
@@ -197,14 +201,14 @@ impl Verifier<'_> {
                 .insts()
                 .iter()
                 .enumerate()
-                .map(|(i, &inst)| (Use::Inst(inst), i + 1, func.inst(inst).args()))
+                .map(|(i, &inst)| (Use::Inst(inst), i + 1, func.inst(inst).args().to_vec()))
                 .chain(
                     data.terminator()
                         .map(|t| (Use::Terminator(block), data.insts().len() + 1, t.args())),
                 );
 
             for (user, pos, args) in uses {
-                for &value in args.iter().filter(|&&v| func.contains_value(v)) {
+                for value in args.into_iter().filter(|&v| func.contains_value(v)) {
                     let Some((def_block, def_idx)) = def_pos(value) else {
                         self.errors.push(VerifyError::NotDominated { user, value });
                         continue;
@@ -218,95 +222,6 @@ impl Verifier<'_> {
                         self.errors.push(VerifyError::NotDominated { user, value });
                     }
                 }
-            }
-        }
-    }
-}
-
-struct Dominators {
-    idom: Vec<Option<usize>>,
-}
-
-impl Dominators {
-    // cooper-harvey-kennedy iterative dominators over blocks reachable from entry
-    fn compute(func: &Function) -> Self {
-        let n = func.blocks().count();
-        let successors = |b: usize| match func.block(Block::from_index(b)).terminator() {
-            Some(Terminator::Jump { dest, .. }) if func.contains_block(*dest) => Some(dest.index()),
-            _ => None,
-        };
-
-        let mut postorder = Vec::new();
-        let mut visited = vec![false; n];
-        let mut stack = vec![(0, false)];
-        while let Some((b, done)) = stack.pop() {
-            if done {
-                postorder.push(b);
-                continue;
-            }
-            if std::mem::replace(&mut visited[b], true) {
-                continue;
-            }
-            stack.push((b, true));
-            stack.extend(successors(b).filter(|&s| !visited[s]).map(|s| (s, false)));
-        }
-        let rpo: Vec<usize> = postorder.into_iter().rev().collect();
-        let mut rpo_num = vec![usize::MAX; n];
-        for (i, &b) in rpo.iter().enumerate() {
-            rpo_num[b] = i;
-        }
-
-        let mut preds = vec![Vec::new(); n];
-        for &b in &rpo {
-            if let Some(s) = successors(b) {
-                preds[s].push(b);
-            }
-        }
-
-        let mut idom: Vec<Option<usize>> = vec![None; n];
-        idom[0] = Some(0);
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for &b in rpo.iter().skip(1) {
-                let mut candidates = preds[b].iter().copied().filter(|&p| idom[p].is_some());
-                let Some(first) = candidates.next() else {
-                    continue;
-                };
-                let new_idom = candidates.fold(first, |a, p| {
-                    let (mut a, mut p) = (a, p);
-                    while a != p {
-                        while rpo_num[a] > rpo_num[p] {
-                            a = idom[a].unwrap();
-                        }
-                        while rpo_num[p] > rpo_num[a] {
-                            p = idom[p].unwrap();
-                        }
-                    }
-                    a
-                });
-                if idom[b] != Some(new_idom) {
-                    idom[b] = Some(new_idom);
-                    changed = true;
-                }
-            }
-        }
-        Self { idom }
-    }
-
-    fn is_reachable(&self, block: Block) -> bool {
-        self.idom[block.index()].is_some()
-    }
-
-    fn dominates(&self, a: Block, b: Block) -> bool {
-        let (a, mut b) = (a.index(), b.index());
-        loop {
-            if a == b {
-                return true;
-            }
-            match self.idom[b] {
-                Some(parent) if parent != b => b = parent,
-                _ => return false,
             }
         }
     }

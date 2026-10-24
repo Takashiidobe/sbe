@@ -23,9 +23,15 @@ pub(super) struct InstAst<'a> {
     pub op: Op<'a>,
 }
 
+pub(super) struct TargetAst<'a> {
+    pub dest: Name<'a>,
+    pub args: Vec<Name<'a>>,
+}
+
 pub(super) enum TermAst<'a> {
     Return(Vec<Name<'a>>),
-    Jump(Name<'a>, Vec<Name<'a>>),
+    Jump(TargetAst<'a>),
+    Brif(Name<'a>, TargetAst<'a>, TargetAst<'a>),
 }
 
 pub(super) struct BlockAst<'a> {

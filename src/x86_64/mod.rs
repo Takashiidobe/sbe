@@ -9,7 +9,7 @@ pub use emit::{Compiled, emit};
 pub use error::CompileError;
 pub use lower::lower;
 pub use regalloc::allocate;
-pub use vcode::{Inst, PReg, Reg, VCode, VReg};
+pub use vcode::{Inst, Label, PReg, Reg, VBlock, VCode, VReg};
 
 use crate::sir::{Function, verify};
 

@@ -1,0 +1,23 @@
+function %product(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iconst 0
+    jump block1(v0, v2)
+
+block1(v3: i64, v4: i64):
+    jump block2(v1, v4)
+
+block2(v5: i64, v6: i64):
+    v7 = iconst 1
+    v8 = iadd v6, v7
+    v9 = iconst -1
+    v10 = iadd v5, v9
+    brif v10, block2(v10, v8), block3(v8)
+
+block3(v11: i64):
+    v12 = iconst -1
+    v13 = iadd v3, v12
+    brif v13, block1(v13, v11), block4(v11)
+
+block4(v14: i64):
+    return v14
+}

@@ -1,9 +1,0 @@
-; test x86_64-error
-; check: x86_64 does not support functions with more than one block yet
-function %f() {
-block0:
-    jump block1
-
-block1:
-    return
-}

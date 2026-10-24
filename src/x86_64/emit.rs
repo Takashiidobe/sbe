@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use iced_x86::code_asm::{AsmRegister64, CodeAssembler, r8, r9, r10, r11, rax, rcx, rdi, rdx, rsi};
 use iced_x86::{Formatter, IntelFormatter};
 
@@ -30,14 +32,46 @@ fn assemble_error(err: iced_x86::IcedError) -> CompileError {
 
 pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
     let mut a = CodeAssembler::new(64).map_err(assemble_error)?;
-    for inst in &code.insts {
-        match *inst {
-            Inst::MovImm { dst, imm } => a.mov(asm_reg(dst), imm),
-            Inst::Mov { dst, src } => a.mov(asm_reg(dst), asm_reg(src)),
-            Inst::Add { dst, src } => a.add(asm_reg(dst), asm_reg(src)),
-            Inst::Ret { .. } => a.ret(),
+
+    // a block left empty by dropping its fallthrough jump shares the next block's label
+    let emitted = |index: usize, inst: &Inst<PReg>| !matches!(inst, Inst::Jmp { target } if target.0 == index + 1);
+    let mut resolved: Vec<usize> = (0..code.blocks.len()).collect();
+    for index in (0..code.blocks.len() - 1).rev() {
+        if !code.blocks[index].insts.iter().any(|i| emitted(index, i)) {
+            resolved[index] = resolved[index + 1];
         }
-        .map_err(assemble_error)?;
+    }
+    let mut labels: Vec<_> = (0..code.blocks.len()).map(|_| a.create_label()).collect();
+    let targeted: BTreeSet<usize> = code
+        .blocks
+        .iter()
+        .flat_map(|b| b.insts.iter().filter_map(|i| i.target()))
+        .map(|t| resolved[t.0])
+        .collect();
+
+    let mut lines = Vec::new();
+    for (index, block) in code.blocks.iter().enumerate() {
+        if targeted.contains(&index) && resolved[index] == index {
+            a.set_label(&mut labels[index]).map_err(assemble_error)?;
+            lines.push(Line::Label(index));
+        }
+        for inst in block.insts.iter().filter(|i| emitted(index, i)) {
+            match *inst {
+                Inst::MovImm { dst, imm } => a.mov(asm_reg(dst), imm),
+                Inst::Mov { dst, src } => a.mov(asm_reg(dst), asm_reg(src)),
+                Inst::Add { dst, src } => a.add(asm_reg(dst), asm_reg(src)),
+                Inst::Test { reg } => a.test(asm_reg(reg), asm_reg(reg)),
+                Inst::Jnz { target } => a.jne(labels[resolved[target.0]]),
+                Inst::Jmp { target } => a.jmp(labels[resolved[target.0]]),
+                Inst::Ret { .. } => a.ret(),
+            }
+            .map_err(assemble_error)?;
+            lines.push(match *inst {
+                Inst::Jnz { target } => Line::Branch("jne", resolved[target.0]),
+                Inst::Jmp { target } => Line::Branch("jmp", resolved[target.0]),
+                _ => Line::Plain,
+            });
+        }
     }
 
     let bytes = a.assemble(0).map_err(assemble_error)?;
@@ -50,10 +84,20 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
     options.set_uppercase_hex(false);
     options.set_signed_immediate_operands(true);
     let mut asm = format!("{}:\n", code.name);
-    for inst in a.instructions() {
-        asm.push_str("    ");
-        formatter.format(inst, &mut asm);
-        asm.push('\n');
+    let mut instructions = a.instructions().iter();
+    for line in lines {
+        match line {
+            Line::Label(index) => asm.push_str(&format!(".Lbb{index}:\n")),
+            Line::Branch(mnemonic, target) => {
+                instructions.next();
+                asm.push_str(&format!("    {mnemonic} .Lbb{target}\n"));
+            }
+            Line::Plain => {
+                asm.push_str("    ");
+                formatter.format(instructions.next().expect("one per line"), &mut asm);
+                asm.push('\n');
+            }
+        }
     }
 
     Ok(Compiled {
@@ -61,4 +105,10 @@ pub fn emit(code: &VCode<PReg>) -> Result<Compiled, CompileError> {
         code: bytes,
         asm,
     })
+}
+
+enum Line {
+    Label(usize),
+    Branch(&'static str, usize),
+    Plain,
 }

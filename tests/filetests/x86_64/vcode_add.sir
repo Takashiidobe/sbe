@@ -1,5 +1,6 @@
 ; test x86_64-vcode
 ; check: vcode %add:
+; nextln: bb0:
 ; nextln:     mov v0, rdi
 ; nextln:     mov v1, rsi
 ; nextln:     mov v2, v0

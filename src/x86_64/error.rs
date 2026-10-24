@@ -9,10 +9,6 @@ pub enum CompileError {
     #[diagnostic(code(x86_64::invalid_function))]
     Invalid(#[from] VerifyErrors),
 
-    #[error("x86_64 does not support functions with more than one block yet")]
-    #[diagnostic(code(x86_64::multiple_blocks))]
-    MultipleBlocks,
-
     #[error("x86_64 supports at most {max} register params, found {found}")]
     #[diagnostic(code(x86_64::too_many_params))]
     TooManyParams { found: usize, max: usize },

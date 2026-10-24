@@ -1,0 +1,32 @@
+; test x86_64-vcode
+; check: bb0:
+; nextln:     mov v0, rdi
+; nextln:     test v0, v0
+; nextln:     jnz bb1
+; nextln:     jmp bb2
+; check: bb1:
+; nextln:     mov v1, 10
+; nextln:     mov v3, v1
+; nextln:     jmp bb3
+; check: bb2:
+; nextln:     mov v2, 20
+; nextln:     mov v3, v2
+; nextln:     jmp bb3
+; check: bb3:
+; nextln:     mov rax, v3
+; nextln:     ret
+function %pick(i64) -> i64 {
+block0(v0: i64):
+    brif v0, block1, block2
+
+block1:
+    v1 = iconst 10
+    jump block3(v1)
+
+block2:
+    v2 = iconst 20
+    jump block3(v2)
+
+block3(v3: i64):
+    return v3
+}

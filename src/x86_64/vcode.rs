@@ -90,29 +90,50 @@ impl fmt::Display for Reg {
     }
 }
 
-/// two-address instructions: `Add` reads and writes `dst`
+/// index of a block in [`VCode::blocks`]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Label(pub usize);
+
+impl fmt::Display for Label {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "bb{}", self.0)
+    }
+}
+
+/// two-address instructions: `Add` reads and writes `dst`. branches end a block: a conditional
+/// `Jnz` is always followed by a `Jmp`, so blocks never fall through implicitly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Inst<R> {
     MovImm { dst: R, imm: i64 },
     Mov { dst: R, src: R },
     Add { dst: R, src: R },
+    Test { reg: R },
+    Jnz { target: Label },
+    Jmp { target: Label },
     Ret { has_value: bool },
 }
 
 impl<R: Copy> Inst<R> {
     pub fn uses(&self) -> Vec<R> {
         match *self {
-            Inst::MovImm { .. } => vec![],
+            Inst::MovImm { .. } | Inst::Jnz { .. } | Inst::Jmp { .. } | Inst::Ret { .. } => vec![],
             Inst::Mov { src, .. } => vec![src],
             Inst::Add { dst, src } => vec![dst, src],
-            Inst::Ret { .. } => vec![],
+            Inst::Test { reg } => vec![reg],
         }
     }
 
     pub fn defs(&self) -> Vec<R> {
         match *self {
             Inst::MovImm { dst, .. } | Inst::Mov { dst, .. } | Inst::Add { dst, .. } => vec![dst],
-            Inst::Ret { .. } => vec![],
+            Inst::Test { .. } | Inst::Jnz { .. } | Inst::Jmp { .. } | Inst::Ret { .. } => vec![],
+        }
+    }
+
+    pub fn target(&self) -> Option<Label> {
+        match *self {
+            Inst::Jnz { target } | Inst::Jmp { target } => Some(target),
+            _ => None,
         }
     }
 
@@ -127,6 +148,9 @@ impl<R: Copy> Inst<R> {
                 dst: f(dst),
                 src: f(src),
             },
+            Inst::Test { reg } => Inst::Test { reg: f(reg) },
+            Inst::Jnz { target } => Inst::Jnz { target },
+            Inst::Jmp { target } => Inst::Jmp { target },
             Inst::Ret { has_value } => Inst::Ret { has_value },
         }
     }
@@ -138,22 +162,36 @@ impl<R: fmt::Display> fmt::Display for Inst<R> {
             Inst::MovImm { dst, imm } => write!(f, "mov {dst}, {imm}"),
             Inst::Mov { dst, src } => write!(f, "mov {dst}, {src}"),
             Inst::Add { dst, src } => write!(f, "add {dst}, {src}"),
+            Inst::Test { reg } => write!(f, "test {reg}, {reg}"),
+            Inst::Jnz { target } => write!(f, "jnz {target}"),
+            Inst::Jmp { target } => write!(f, "jmp {target}"),
             Inst::Ret { .. } => f.write_str("ret"),
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VBlock<R> {
+    pub insts: Vec<Inst<R>>,
+}
+
+/// blocks in layout order; the first is the entry
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VCode<R> {
     pub name: String,
-    pub insts: Vec<Inst<R>>,
+    pub blocks: Vec<VBlock<R>>,
 }
 
 impl<R: fmt::Display> fmt::Display for VCode<R> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "vcode %{}:", self.name)?;
-        self.insts
-            .iter()
-            .try_for_each(|inst| writeln!(f, "    {inst}"))
+        for (i, block) in self.blocks.iter().enumerate() {
+            writeln!(f, "{}:", Label(i))?;
+            block
+                .insts
+                .iter()
+                .try_for_each(|inst| writeln!(f, "    {inst}"))?;
+        }
+        Ok(())
     }
 }

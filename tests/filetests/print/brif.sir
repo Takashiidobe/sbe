@@ -1,0 +1,16 @@
+; test print
+; check: block0(v0: i64):
+; nextln:     brif v0, block1(v0), block2
+; check: block1(v1: i64):
+; nextln:     return v1
+function %f(i64) -> i64 {
+block0(v0: i64):
+    brif v0, block1(v0), block2
+
+block1(v1: i64):
+    return v1
+
+block2:
+    v2 = iconst 0
+    return v2
+}

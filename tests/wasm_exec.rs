@@ -1,3 +1,5 @@
+mod common;
+
 use sbe::sir::{FunctionBuilder, Signature, Type, parse_function};
 use sbe::wasm::compile;
 use wasmi::{Engine, Instance, Linker, Module, Store};
@@ -73,4 +75,111 @@ fn void_function() {
     let (mut store, instance) = instantiate(&code);
     let nop = instance.get_typed_func::<(), ()>(&store, "nop").unwrap();
     nop.call(&mut store, ()).unwrap();
+}
+
+fn typed<P, R>(code: &[u8], name: &str) -> (Store<()>, wasmi::TypedFunc<P, R>)
+where
+    P: wasmi::WasmParams,
+    R: wasmi::WasmResults,
+{
+    let (store, instance) = instantiate(code);
+    let func = instance.get_typed_func::<P, R>(&store, name).unwrap();
+    (store, func)
+}
+
+#[test]
+fn counting_loop() {
+    let (mut store, f) = typed::<i64, i64>(&compile_text(common::SUM_TO), "sum_to");
+    for n in [1, 2, 10, 1000] {
+        assert_eq!(f.call(&mut store, n).unwrap(), common::sum_to(n));
+    }
+}
+
+#[test]
+fn loop_carried_values_move_in_parallel() {
+    let (mut store, f) = typed::<i64, i64>(&compile_text(common::FIB), "fib");
+    for n in 1..=40 {
+        assert_eq!(f.call(&mut store, n).unwrap(), common::fib(n));
+    }
+}
+
+#[test]
+fn swapping_params_is_simultaneous() {
+    let (mut store, f) = typed::<(i64, i64, i64), i64>(&compile_text(common::SWAP_N), "swap_n");
+    for n in 1..=5 {
+        assert_eq!(
+            f.call(&mut store, (n, 100, 200)).unwrap(),
+            common::swap_n(n, 100, 200)
+        );
+    }
+}
+
+#[test]
+fn both_branch_edges_move_params() {
+    let (mut store, f) = typed::<(i64, i64), i64>(&compile_text(common::BOTH_EDGES_MOVE), "pick");
+    assert_eq!(f.call(&mut store, (5, 7)).unwrap(), 7);
+    assert_eq!(f.call(&mut store, (0, 7)).unwrap(), 0);
+}
+
+#[test]
+fn nested_loops() {
+    let (mut store, f) = typed::<(i64, i64), i64>(&compile_text(common::NESTED_LOOPS), "product");
+    for (n, m) in [(1, 1), (3, 4), (7, 5), (20, 30)] {
+        assert_eq!(f.call(&mut store, (n, m)).unwrap(), n * m);
+    }
+}
+
+#[test]
+fn irreducible_control_flow() {
+    let (mut store, f) =
+        typed::<(i64, i64), i64>(&compile_text(common::IRREDUCIBLE), "irreducible");
+    for entry in [0, 1] {
+        for n in 1..=9 {
+            assert_eq!(
+                f.call(&mut store, (entry, n)).unwrap(),
+                common::irreducible(entry, n)
+            );
+        }
+    }
+}
+
+#[test]
+fn unreachable_blocks_are_dropped() {
+    let (mut store, f) = typed::<(), i64>(&compile_text(common::UNREACHABLE_BLOCK), "f");
+    assert_eq!(f.call(&mut store, ()).unwrap(), 7);
+}
+
+#[test]
+fn builder_diamond() {
+    let signature = Signature {
+        params: vec![Type::I64],
+        returns: vec![Type::I64],
+    };
+    let mut builder = FunctionBuilder::new("pick", signature);
+    let entry = builder.entry_block();
+    let (then_block, else_block, merge) = (
+        builder.create_block(),
+        builder.create_block(),
+        builder.create_block(),
+    );
+    let result = builder.append_block_param(merge, Type::I64).unwrap();
+    let cond = builder.block_params(entry).unwrap()[0];
+
+    builder.switch_to_block(entry).unwrap();
+    builder
+        .brif(cond, then_block, &[], else_block, &[])
+        .unwrap();
+    builder.switch_to_block(then_block).unwrap();
+    let ten = builder.iconst(10).unwrap();
+    builder.jump(merge, &[ten]).unwrap();
+    builder.switch_to_block(else_block).unwrap();
+    let twenty = builder.iconst(20).unwrap();
+    builder.jump(merge, &[twenty]).unwrap();
+    builder.switch_to_block(merge).unwrap();
+    builder.ret(result).unwrap();
+
+    let code = compile(&builder.finish().unwrap()).unwrap().code;
+    let (mut store, f) = typed::<i64, i64>(&code, "pick");
+    assert_eq!(f.call(&mut store, 1).unwrap(), 10);
+    assert_eq!(f.call(&mut store, 0).unwrap(), 20);
 }

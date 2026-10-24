@@ -1,0 +1,16 @@
+; test verify
+; check: the terminator of block3 uses v1, whose definition does not dominate the use
+function %f(i64) -> i64 {
+block0(v0: i64):
+    brif v0, block1, block2
+
+block1:
+    v1 = iconst 1
+    jump block3
+
+block2:
+    jump block3
+
+block3:
+    return v1
+}

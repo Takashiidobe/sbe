@@ -1,0 +1,6 @@
+; test parse-error
+; check: expected `,`
+function %f(i64) {
+block0(v0: i64):
+    brif v0, block0
+}

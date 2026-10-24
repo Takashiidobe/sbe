@@ -94,6 +94,30 @@ impl FunctionBuilder {
         })
     }
 
+    pub fn brif(
+        &mut self,
+        cond: Value,
+        then_dest: Block,
+        then_args: &[Value],
+        else_dest: Block,
+        else_args: &[Value],
+    ) -> Result<(), BuilderError> {
+        self.check_value(cond)?;
+        self.check_block(then_dest)?;
+        self.check_block(else_dest)?;
+        then_args
+            .iter()
+            .chain(else_args)
+            .try_for_each(|&v| self.check_value(v))?;
+        self.terminate(Terminator::Brif {
+            cond,
+            then_dest,
+            then_args: then_args.to_vec(),
+            else_dest,
+            else_args: else_args.to_vec(),
+        })
+    }
+
     pub fn finish(self) -> Result<Function, VerifyErrors> {
         verify(&self.func)?;
         Ok(self.func)

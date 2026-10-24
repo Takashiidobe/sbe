@@ -1,0 +1,12 @@
+; test verify
+; check: block0 jumps to block2 with the wrong number of args
+function %f(i64) {
+block0(v0: i64):
+    brif v0, block1, block2(v0)
+
+block1:
+    return
+
+block2:
+    return
+}
