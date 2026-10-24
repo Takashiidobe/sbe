@@ -45,6 +45,7 @@ fn run(path: &Path) -> Result<(), Failed> {
     let source = fs::read_to_string(path)?;
     let stage = stage_of(&source)?;
     let output = run_stage(&stage, path, &source)?;
+    dump_output(path, &output)?;
 
     let checker = CheckerBuilder::new().text(&source)?.finish();
     if checker.is_empty() {
@@ -56,6 +57,16 @@ fn run(path: &Path) -> Result<(), Failed> {
     } else {
         Err(format!("{explanation}\n--- output ---\n{output}").into())
     }
+}
+
+fn dump_output(path: &Path, output: &str) -> Result<(), Failed> {
+    let Some(dir) = std::env::var_os("FILECHECK_DUMP_DIR") else {
+        return Ok(());
+    };
+    let target = Path::new(&dir).join(path.strip_prefix(ROOT)?.with_extension("out"));
+    fs::create_dir_all(target.parent().unwrap())?;
+    fs::write(target, output)?;
+    Ok(())
 }
 
 fn stage_of(source: &str) -> Result<String, Failed> {
