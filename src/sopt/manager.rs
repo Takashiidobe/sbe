@@ -1,7 +1,7 @@
 use miette::Diagnostic;
 use thiserror::Error;
 
-use super::{NullPass, Pass};
+use super::{EGraphOptimizer, Pass};
 use crate::sir::{Function, VerifyErrors, verify};
 
 #[derive(Clone, Debug, PartialEq, Eq, Error, Diagnostic)]
@@ -28,7 +28,7 @@ impl PassManager {
 
     pub fn default_pipeline() -> Self {
         let mut manager = Self::new();
-        manager.add(NullPass);
+        manager.add(EGraphOptimizer::default());
         manager
     }
 

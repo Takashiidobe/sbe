@@ -177,6 +177,77 @@ impl Function {
         &self.insts[inst.index()].data
     }
 
+    pub fn replace_inst(&mut self, inst: Inst, data: InstData) {
+        let ty = data.result_type(
+            |v| self.value_type(v),
+            |f| self.callee(f).signature.returns.first().copied(),
+        );
+        assert_eq!(ty, self.inst_result(inst).map(|v| self.value_type(v)));
+        self.insts[inst.index()].data = data;
+    }
+
+    pub(crate) fn take_block_insts(&mut self, block: Block) -> Vec<Inst> {
+        std::mem::take(&mut self.blocks[block.index()].insts)
+    }
+
+    pub(crate) fn append_existing_inst(&mut self, block: Block, inst: Inst) {
+        self.blocks[block.index()].insts.push(inst);
+    }
+
+    pub(crate) fn compact(&mut self) {
+        let mut value_map = vec![None; self.values.len()];
+        let mut inst_map = vec![None; self.insts.len()];
+        let mut old_values = Vec::new();
+        let mut old_insts = Vec::new();
+        for block in &self.blocks {
+            for &value in &block.params {
+                value_map[value.index()] = Some(Value::from_index(old_values.len()));
+                old_values.push(value);
+            }
+            for &inst in &block.insts {
+                inst_map[inst.index()] = Some(Inst::from_index(old_insts.len()));
+                old_insts.push(inst);
+                if let Some(value) = self.inst_result(inst) {
+                    value_map[value.index()] = Some(Value::from_index(old_values.len()));
+                    old_values.push(value);
+                }
+            }
+        }
+        let map_value = |value: Value| value_map[value.index()].expect("value is in the layout");
+        let values = old_values
+            .into_iter()
+            .map(|value| {
+                let mut entry = self.values[value.index()].clone();
+                if let ValueDef::Result(inst) = &mut entry.def {
+                    *inst = inst_map[inst.index()].expect("definition is in the layout");
+                }
+                entry
+            })
+            .collect();
+        let insts = old_insts
+            .into_iter()
+            .map(|inst| {
+                let mut entry = self.insts[inst.index()].clone();
+                entry.result = entry.result.map(map_value);
+                entry.data.map_args(map_value);
+                entry
+            })
+            .collect();
+        for block in &mut self.blocks {
+            for value in &mut block.params {
+                *value = map_value(*value);
+            }
+            for inst in &mut block.insts {
+                *inst = inst_map[inst.index()].unwrap();
+            }
+            if let Some(term) = &mut block.terminator {
+                term.map_args(map_value);
+            }
+        }
+        self.values = values;
+        self.insts = insts;
+    }
+
     pub fn inst_result(&self, inst: Inst) -> Option<Value> {
         self.insts[inst.index()].result
     }

@@ -3,7 +3,7 @@ use super::{Block, FuncRef, StackSlot, Type, Value};
 /// binary ops take two operands of one integer type and yield that type. shift amounts are taken
 /// modulo the type's width. `sdiv`, `udiv`, `srem` and `urem` trap on a zero divisor. the signed
 /// forms trap on `i64::MIN` by `-1`; for narrower types that overflow wraps instead.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BinOp {
     Iadd,
     Isub,
@@ -343,6 +343,33 @@ impl InstData {
         })
     }
 
+    pub fn map_args(&mut self, mut map: impl FnMut(Value) -> Value) {
+        match self {
+            Self::Iconst { .. } | Self::Fconst { .. } | Self::StackAddr { .. } => {}
+            Self::Unary { arg, .. } | Self::Convert { arg, .. } => *arg = map(*arg),
+            Self::Load { addr, .. } => *addr = map(*addr),
+            Self::Binary { args, .. }
+            | Self::Fbinary { args, .. }
+            | Self::Icmp { args, .. }
+            | Self::Fcmp { args, .. }
+            | Self::Store { args } => {
+                for arg in args {
+                    *arg = map(*arg);
+                }
+            }
+            Self::Select { args } => {
+                for arg in args {
+                    *arg = map(*arg);
+                }
+            }
+            Self::Call { args, .. } => {
+                for arg in args {
+                    *arg = map(*arg);
+                }
+            }
+        }
+    }
+
     pub fn args(&self) -> &[Value] {
         match self {
             InstData::Iconst { .. } | InstData::Fconst { .. } | InstData::StackAddr { .. } => &[],
@@ -400,6 +427,48 @@ pub enum Terminator {
 }
 
 impl Terminator {
+    pub fn map_args(&mut self, mut map: impl FnMut(Value) -> Value) {
+        match self {
+            Self::Return { values } => {
+                for value in values {
+                    *value = map(*value);
+                }
+            }
+            Self::Jump { args, .. } => {
+                for arg in args {
+                    *arg = map(*arg);
+                }
+            }
+            Self::Brif {
+                cond,
+                then_args,
+                else_args,
+                ..
+            } => {
+                *cond = map(*cond);
+                for arg in then_args.iter_mut().chain(else_args) {
+                    *arg = map(*arg);
+                }
+            }
+            Self::Switch {
+                value,
+                cases,
+                default_args,
+                ..
+            } => {
+                *value = map(*value);
+                for arg in cases
+                    .iter_mut()
+                    .flat_map(|case| &mut case.args)
+                    .chain(default_args)
+                {
+                    *arg = map(*arg);
+                }
+            }
+            Self::Trap | Self::Unreachable => {}
+        }
+    }
+
     pub fn args(&self) -> Vec<Value> {
         match self {
             Terminator::Return { values } => values.clone(),

@@ -248,3 +248,81 @@ fn i8_block_param_carries_comparison() {
     assert_eq!(f.call(&mut store, (2, 1)).unwrap(), 0);
     assert_eq!(f.call(&mut store, (-1, 1)).unwrap(), 0);
 }
+
+#[test]
+fn constant_folding_preserves_wrapping_arithmetic() {
+    for (ty, expected) in [
+        ("i8", 254),
+        ("i16", 65534),
+        ("i32", 4294967294),
+        ("i64", -2),
+    ] {
+        let source = format!(
+            "function %fold() -> i64 {{
+block0:
+ v0 = iconst {ty} -1
+ v1 = iconst {ty} 2
+ v2 = imul v0, v1
+ {}
+}}",
+            if ty == "i64" {
+                "return v2".to_owned()
+            } else {
+                "v3 = uextend i64 v2
+ return v3"
+                    .to_owned()
+            }
+        );
+        let mut func = parse_function("fold", &source).unwrap();
+        sbe::sopt::PassManager::default_pipeline()
+            .verify_between_passes(true)
+            .run(&mut func)
+            .unwrap();
+        let (mut store, instance) = instantiate(&compile(&func).unwrap().code);
+        let fold = instance.get_typed_func::<(), i64>(&store, "fold").unwrap();
+        assert_eq!(fold.call(&mut store, ()).unwrap(), expected);
+    }
+}
+
+#[test]
+fn egraph_preserves_loop_carried_values() {
+    for (source, name, reference) in [
+        (common::SUM_TO, "sum_to", common::sum_to as fn(i64) -> i64),
+        (common::FIB, "fib", common::fib as fn(i64) -> i64),
+    ] {
+        let mut func = parse_function(name, source).unwrap();
+        sbe::sopt::PassManager::default_pipeline()
+            .verify_between_passes(true)
+            .run(&mut func)
+            .unwrap();
+        let (mut store, instance) = instantiate(&compile(&func).unwrap().code);
+        let run = instance.get_typed_func::<i64, i64>(&store, name).unwrap();
+        for n in 1..30 {
+            assert_eq!(run.call(&mut store, n).unwrap(), reference(n));
+        }
+    }
+}
+
+#[test]
+fn egraph_preserves_unused_trapping_operations() {
+    let mut func = parse_function(
+        "trap",
+        "
+function %trap() -> i64 {
+block0:
+    v0 = iconst i64 9
+    v1 = iconst i64 0
+    v2 = sdiv v0, v1
+    return v0
+}
+",
+    )
+    .unwrap();
+    sbe::sopt::PassManager::default_pipeline()
+        .verify_between_passes(true)
+        .run(&mut func)
+        .unwrap();
+    let (mut store, instance) = instantiate(&compile(&func).unwrap().code);
+    let run = instance.get_typed_func::<(), i64>(&store, "trap").unwrap();
+    assert!(run.call(&mut store, ()).is_err());
+}

@@ -108,3 +108,63 @@ fn verification_can_be_disabled() {
     manager.add(Breaker).verify_between_passes(false);
     assert!(manager.run(&mut identity()).is_ok());
 }
+
+struct MultiplyByZero;
+
+impl sbe::sopt::Rewrite for MultiplyByZero {
+    fn priority(&self) -> u32 {
+        1
+    }
+
+    fn accepts(&self, expr: &sbe::sopt::Expr) -> bool {
+        matches!(
+            expr,
+            sbe::sopt::Expr::Binary {
+                op: BinOp::Imul,
+                ..
+            }
+        )
+    }
+
+    fn rewrite(
+        &self,
+        graph: &sbe::sopt::EGraph,
+        expr: &sbe::sopt::Expr,
+    ) -> Option<sbe::sopt::Expr> {
+        let sbe::sopt::Expr::Binary { ty, args, .. } = *expr else {
+            return None;
+        };
+        args.iter()
+            .any(|&arg| graph.constant(arg) == Some(0))
+            .then_some(sbe::sopt::Expr::Iconst { ty, value: 0 })
+    }
+}
+
+#[test]
+fn egraph_rules_cooperate_and_elaboration_is_idempotent() {
+    let mut func = parse_function(
+        "rewrite",
+        "
+function %rewrite(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst i64 0
+    v2 = imul v0, v1
+    v3 = iconst i64 7
+    v4 = iadd v2, v3
+    return v4
+}
+",
+    )
+    .unwrap();
+    let mut optimizer = sbe::sopt::EGraphOptimizer::default();
+    optimizer.add(MultiplyByZero);
+    let mut manager = PassManager::new();
+    manager.add(optimizer).verify_between_passes(true);
+    manager.run(&mut func).unwrap();
+    let output = func.to_string();
+    assert!(!output.contains("imul"));
+    assert!(!output.contains("iadd"));
+    assert!(output.contains("iconst i64 7"));
+    manager.run(&mut func).unwrap();
+    assert_eq!(func.to_string(), output);
+}
